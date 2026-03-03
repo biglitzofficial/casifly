@@ -1,3 +1,36 @@
+// ---- Auth & Admin ----
+export type UserRole = 'master_admin' | 'product_admin' | 'user';
+
+export type StoreType = 'other' | 'casifly';
+
+export interface Product {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  status: 'active' | 'inactive';
+  storeType?: StoreType; // 'other' | 'casifly' - casifly stores use ids like c1, c2
+  createdAt: string;
+}
+
+export interface ProductUser {
+  id: string;
+  productId: string;
+  email: string;
+  password: string; // In production, use hashed passwords
+  name: string;
+  role: 'admin' | 'user';
+  status: 'active' | 'inactive';
+  createdAt: string;
+}
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  productId?: string; // For product users
+}
 
 export enum AccountType {
   ASSET = 'ASSET',
@@ -38,6 +71,7 @@ export interface Customer {
   commissionRates: Rates;
   ledgerAccountId: string;
   joinedAt?: string;
+  storeId?: string; // undefined = legacy (master only), set = store-specific
 }
 
 export interface PGConfig {
@@ -50,6 +84,7 @@ export interface Wallet {
   name: string;
   ledgerAccountId: string;
   pgs: PGConfig[];
+  storeId?: string; // undefined = global (all stores), set = store-specific
 }
 
 export interface LedgerEntry {
@@ -63,6 +98,7 @@ export interface TransactionMetadata {
   walletId?: string;
   cardType?: string;
   relatedTransactionId?: string;
+  storeId?: string; // Product/store id for analytics
 }
 
 export interface Transaction {
@@ -87,6 +123,7 @@ export interface CreateWalletDTO {
   name: string;
   pgName: string;
   charges: Rates;
+  storeId?: string; // undefined = global, set = store-specific
 }
 
 export interface BalanceSheet {

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:full": "concurrently \"npm run dev\" \"npm run dev:server\"",
+    "dev:server": "npm run dev --prefix server",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -17,6 +19,7 @@
     "tailwind-merge": "^2.2.0"
   },
   "devDependencies": {
+    "concurrently": "^9.1.0",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",

@@ -1,11 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { useERP } from '../context/ERPContext';
+import { useToast } from '../context/ToastContext';
 import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent, Input, Button } from '../components/ui/Elements';
-import { Search, UserCheck, UserX, Clock, Send, Phone, AlertCircle } from 'lucide-react';
+import { PageFilters } from '../components/ui/PageFilters';
+import { UserCheck, Clock, Send, Phone, AlertCircle } from 'lucide-react';
 
 export const CRM: React.FC = () => {
   const { customers, transactions, formatCurrency } = useERP();
+  const toast = useToast();
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [search, setSearch] = useState('');
 
@@ -42,43 +45,39 @@ export const CRM: React.FC = () => {
   });
 
   const sendReminder = (name: string, phone: string) => {
-    alert(`Reminder nudge triggered for ${name} (${phone}). (Simulated SMS/WhatsApp)`);
+    toast.info(`Reminder nudge triggered for ${name} (${phone}). (Simulated SMS/WhatsApp)`);
   };
 
   return (
     <Layout title="CRM & Activity Monitoring">
-      
-      <div className="flex flex-col md:flex-row gap-4 mb-6 justify-between items-center bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-        <div className="relative w-full md:w-96">
-           <Input 
-             placeholder="Search by name or 10-digit phone..." 
-             value={search} 
-             onChange={e => setSearch(e.target.value)} 
-             className="pl-10"
-           />
-           <Search className="absolute left-3 top-3.5 text-gray-400" size={16} />
-        </div>
-        
-        <div className="flex gap-2 p-1 bg-gray-100 rounded-lg">
-           <FilterBtn label="All" active={filter === 'all'} onClick={() => setFilter('all')} />
-           <FilterBtn label="Active" active={filter === 'active'} onClick={() => setFilter('active')} count={customerMetrics.filter(c => c.status === 'active').length} />
-           <FilterBtn label="Inactive (90d+)" active={filter === 'inactive'} onClick={() => setFilter('inactive')} count={customerMetrics.filter(c => c.status === 'inactive').length} isDanger />
-        </div>
-      </div>
+      <PageFilters
+        sectionTitle="Filters"
+        searchPlaceholder="Search by name or 10-digit phone..."
+        searchValue={search}
+        onSearchChange={setSearch}
+        categoryOptions={[
+          { value: 'all', label: `All (${customerMetrics.length})` },
+          { value: 'active', label: `Active (${customerMetrics.filter(c => c.status === 'active').length})` },
+          { value: 'inactive', label: `Inactive 90d+ (${customerMetrics.filter(c => c.status === 'inactive').length})` },
+        ]}
+        categoryValue={filter}
+        onCategoryChange={(v) => setFilter(v as 'all' | 'active' | 'inactive')}
+        categoryLabel="Status"
+      />
 
       <Card>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
-            <thead className="bg-slate-50 text-slate-500 font-bold text-xs uppercase tracking-widest">
+            <thead className="bg-slate-50 border-b border-slate-200">
                <tr>
-                 <th className="p-4">Customer Details</th>
-                 <th className="p-4">Loyalty Status</th>
-                 <th className="p-4">Last Active</th>
-                 <th className="p-4 text-right">Lifetime Volume</th>
-                 <th className="p-4 text-center">Actions</th>
+                 <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider">Customer Details</th>
+                 <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider">Loyalty Status</th>
+                 <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider">Last Active</th>
+                 <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider text-right">Lifetime Volume</th>
+                 <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider text-center">Actions</th>
                </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100 text-sm">
+            <tbody className="divide-y divide-slate-100 text-sm">
                {filteredCustomers.map(c => (
                  <tr key={c.id} className="hover:bg-slate-50 transition-colors">
                    <td className="p-4">
@@ -87,11 +86,11 @@ export const CRM: React.FC = () => {
                    </td>
                    <td className="p-4">
                      {c.status === 'active' ? (
-                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">
+                       <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-100 text-emerald-700 border border-emerald-200">
                          <UserCheck size={12}/> ACTIVE
                        </span>
                      ) : (
-                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700">
+                       <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-100 text-rose-700 border border-rose-200">
                          <AlertCircle size={12}/> INACTIVE ({c.daysInactive}D)
                        </span>
                      )}
@@ -111,7 +110,7 @@ export const CRM: React.FC = () => {
                    </td>
                    <td className="p-4">
                      <div className="flex justify-center gap-2">
-                       <Button size="sm" variant="outline" className="h-9 px-3" onClick={() => sendReminder(c.name, c.phone)}>
+                       <Button size="sm" variant="outline" className="h-9 px-3 border-indigo-200 text-indigo-700 hover:border-indigo-400 hover:text-indigo-800 hover:bg-indigo-50/70" onClick={() => sendReminder(c.name, c.phone)}>
                          <Send size={14} /> Nudge
                        </Button>
                      </div>
@@ -126,16 +125,3 @@ export const CRM: React.FC = () => {
   );
 };
 
-const FilterBtn = ({ label, active, onClick, count, isDanger }: any) => (
-  <button
-    onClick={onClick}
-    className={`px-4 py-2 rounded-md text-xs font-bold transition-all flex items-center gap-2 ${
-      active 
-        ? isDanger ? 'bg-red-600 text-white shadow-lg' : 'bg-blue-600 text-white shadow-lg'
-        : 'text-gray-500 hover:text-gray-700'
-    }`}
-  >
-    {label}
-    {count !== undefined && <span className={`px-1.5 rounded ${active ? 'bg-white/20' : 'bg-gray-200 text-gray-600'}`}>{count}</span>}
-  </button>
-);
