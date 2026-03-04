@@ -8,14 +8,14 @@ Deploy CASIFLY for multi-user testing and production use. This guide covers **Ra
 
 **Why Railway**
 - One platform for frontend + backend
-- Persistent volumes for SQLite (data survives restarts)
+- Firestore for scalable, persistent data (no volumes needed)
 - No cold starts; always-on for real users
 - Simple env vars, GitHub auto-deploy
 - ~$5/month credit on free tier; paid plans scale well
 
-### Option A: Single-Service Deploy (Easiest)
+### Option A: Single-Service Deploy with Firestore (Easiest)
 
-Deploy frontend + backend as one app. The API serves the built React app.
+Deploy frontend + backend as one app. The API serves the built React app and uses **Firestore** as the database.
 
 1. **Push to GitHub** (if not already)
 
@@ -25,26 +25,40 @@ Deploy frontend + backend as one app. The API serves the built React app.
 
 3. **Configure Build**
    - Root Directory: `.` (project root)
-   - Build Command: `npm run build:deploy` (see below)
+   - Build Command: `npm run build:deploy`
    - Start Command: `npm run start:deploy`
    - Output Directory: leave empty
 
 4. **Add Environment Variables** (Railway → Variables)
 
-   | Variable         | Value                          | Required |
-   |-----------------|---------------------------------|----------|
-   | `JWT_SECRET`    | (generate: `openssl rand -hex 32`) | Yes    |
-   | `NODE_ENV`      | `production`                    | Yes      |
-   | `USE_FIRESTORE` | `false`                        | Optional (SQLite default) |
+   | Variable                  | Value                          | Required |
+   |---------------------------|--------------------------------|----------|
+   | `JWT_SECRET`              | `openssl rand -hex 32`         | Yes      |
+   | `NODE_ENV`                | `production`                   | Yes      |
+   | `USE_FIRESTORE`           | `true`                         | Yes      |
+   | `FIREBASE_SERVICE_ACCOUNT`| (see below)                    | Yes      |
 
-5. **Add Persistent Volume** (for SQLite)
-   - Railway → Your service → Variables → Add Volume
-   - Mount Path: `/data`
-   - Set `DATA_DIR=/data` in env vars
+5. **Get Firebase Service Account JSON (one-time)**
+   - Go to [Firebase Console](https://console.firebase.google.com) → Your project → Project Settings → Service Accounts
+   - Click **Generate new private key**
+   - Open the downloaded JSON file
+   - Copy the **entire JSON** (one line, no line breaks)
+   - In Railway Variables, add `FIREBASE_SERVICE_ACCOUNT` and paste the JSON as the value
 
-6. **Seed the database** (one-time, for SQLite)
-   - After first deploy: Railway CLI `railway run npm run seed --prefix server`
-   - Or run locally with `USE_FIRESTORE=false` and `DATA_DIR` pointing to a copy of the DB
+   If using a different project: also set `FIREBASE_PROJECT_ID` to your Firebase project ID.
+
+6. **Seed Firestore** (one-time)
+   - Set the same env vars locally or use Railway CLI:
+   - `railway run npm run seed:firestore --prefix server`
+
+---
+
+### Option A2: SQLite (Alternative – requires persistent volume)
+
+If you prefer SQLite instead of Firestore:
+- Set `USE_FIRESTORE` = `false`
+- Add a Volume at `/data` and set `DATA_DIR` = `/data`
+- Seed with: `railway run npm run seed --prefix server`
 
 ---
 
@@ -68,8 +82,8 @@ Use **Vercel** for the frontend and **Railway** for the API.
 2. Root: `server`
 3. Build: `npm install && npm run build`
 4. Start: `npm start`
-5. **Env vars:** `JWT_SECRET`, `NODE_ENV=production`, `DATA_DIR=/data`
-6. Add volume at `/data` for SQLite
+5. **Env vars:** `JWT_SECRET`, `NODE_ENV=production`, `USE_FIRESTORE=true`, `FIREBASE_SERVICE_ACCOUNT` (JSON string)
+6. Seed: `railway run npm run seed:firestore --prefix server`
 
 ### CORS
 
@@ -81,14 +95,14 @@ Set `CORS_ORIGIN` on Railway to your Vercel URL, e.g. `https://casifly.vercel.ap
 
 **Render** offers a free tier (with 15-min spin-down; not ideal for multi-user) and paid always-on. Persistent disk requires a paid plan.
 
-### Backend on Render
+### Backend on Render (Firestore)
 
 1. [render.com](https://render.com) → New → Web Service
 2. Connect GitHub, root: `server`
 3. Build: `npm install && npm run build`
 4. Start: `npm start`
-5. Add **Disk** (Persistent Storage): Mount Path `/data`
-6. Env: `DATA_DIR=/data`, `JWT_SECRET`, `NODE_ENV=production`
+5. Env: `JWT_SECRET`, `NODE_ENV=production`, `USE_FIRESTORE=true`, `FIREBASE_SERVICE_ACCOUNT` (JSON string)
+6. Seed: Run `npm run seed:firestore --prefix server` with same env vars
 
 ### Frontend on Render (Static Site)
 
@@ -100,13 +114,14 @@ Set `CORS_ORIGIN` on Railway to your Vercel URL, e.g. `https://casifly.vercel.ap
 
 ## Production Checklist
 
-| Item              | Status |
-|-------------------|--------|
-| JWT_SECRET set    | Required – never use dev default |
-| CORS configured   | Set `CORS_ORIGIN` if frontend on different domain |
-| SQLite persistence| Use volume/disk and `DATA_DIR` |
-| Seed data         | Run `npm run seed` in server after first deploy |
-| HTTPS             | Handled by platform |
+| Item                    | Status |
+|-------------------------|--------|
+| JWT_SECRET set          | Required – never use dev default |
+| FIREBASE_SERVICE_ACCOUNT| Required for Firestore (full JSON string) |
+| USE_FIRESTORE           | `true` for Firestore, `false` for SQLite |
+| CORS configured         | Set `CORS_ORIGIN` if frontend on different domain |
+| Seed data               | Run `npm run seed:firestore` (Firestore) or `npm run seed` (SQLite) after first deploy |
+| HTTPS                   | Handled by platform |
 
 ---
 
@@ -121,14 +136,16 @@ Set `CORS_ORIGIN` on Railway to your Vercel URL, e.g. `https://casifly.vercel.ap
 
 ### Backend (runtime)
 
-| Variable          | Description                    | Example           |
-|-------------------|--------------------------------|--------------------|
-| `JWT_SECRET`      | Secret for JWT signing         | (random 32+ chars) |
-| `PORT`            | Server port                    | `3001` (or platform default) |
-| `NODE_ENV`        | Environment                    | `production`       |
-| `USE_FIRESTORE`   | Use Firestore instead of SQLite| `false`            |
-| `DATA_DIR`        | SQLite data directory          | `/data`            |
-| `CORS_ORIGIN`     | Allowed origin(s)               | `https://app.casifly.app` |
+| Variable                  | Description                           | Example              |
+|---------------------------|---------------------------------------|----------------------|
+| `JWT_SECRET`              | Secret for JWT signing                | (random 32+ chars)   |
+| `USE_FIRESTORE`           | Use Firestore (default: true)         | `true`               |
+| `FIREBASE_SERVICE_ACCOUNT`| Firebase service account JSON (string) | `{"type":"service_account",...}` |
+| `FIREBASE_PROJECT_ID`     | Firebase project ID (optional)        | `casifly-14574`      |
+| `PORT`                    | Server port                           | `3001` or platform   |
+| `NODE_ENV`                | Environment                           | `production`         |
+| `DATA_DIR`                | SQLite data dir (only when USE_FIRESTORE=false) | `/data` |
+| `CORS_ORIGIN`             | Allowed origin(s)                     | `https://app.casifly.app` |
 
 ---
 
@@ -141,7 +158,9 @@ Set `CORS_ORIGIN` on Railway to your Vercel URL, e.g. `https://casifly.vercel.ap
 
 ## Troubleshooting
 
-**Database errors:** Ensure `DATA_DIR` points to a persistent volume/disk.
+**Firestore connection failed:** Ensure `FIREBASE_SERVICE_ACCOUNT` is the full JSON string (no line breaks). Paste the entire contents of your service account JSON file.
+
+**Database errors (SQLite):** Ensure `DATA_DIR` points to a persistent volume/disk when using SQLite.
 
 **CORS errors:** Set `CORS_ORIGIN` to your frontend URL (or leave unset for same-origin).
 

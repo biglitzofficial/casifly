@@ -24,7 +24,15 @@ app.use('/api/auth', authRouter);
 app.use('/api/products', productsRouter);
 app.use('/api/erp', erpRouter);
 
-app.get('/api/health', (_, res) => res.json({ ok: true }));
+app.get('/api/health', async (_, res) => {
+  const useFirestore = process.env.USE_FIRESTORE !== 'false' && process.env.USE_FIRESTORE !== '0';
+  if (useFirestore) {
+    const { getFirestore } = await import('./firestore.js');
+    const dbOk = !!getFirestore();
+    return res.json({ ok: true, db: dbOk ? 'Firestore' : 'not configured' });
+  }
+  res.json({ ok: true, db: 'SQLite' });
+});
 
 // Serve built frontend in production (single-service deploy)
 const staticDir = path.join(__dirname, '..', 'public');
@@ -36,7 +44,13 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(staticDir)) {
   });
 }
 
-app.listen(PORT, () => {
-  const db = process.env.USE_FIRESTORE !== 'false' && process.env.USE_FIRESTORE !== '0' ? 'Firestore' : 'SQLite';
-  console.log(`CASIFLY API running on port ${PORT} (DB: ${db})`);
+const HOST = process.env.HOST || '0.0.0.0';
+const useFirestore = process.env.USE_FIRESTORE !== 'false' && process.env.USE_FIRESTORE !== '0';
+app.listen(Number(PORT), HOST, async () => {
+  const db = useFirestore ? 'Firestore' : 'SQLite';
+  console.log(`CASIFLY API running on ${HOST}:${PORT} (DB: ${db})`);
+  if (useFirestore) {
+    const { getFirestore } = await import('./firestore.js');
+    if (!getFirestore()) console.error('WARNING: Firestore not configured. Set FIREBASE_SERVICE_ACCOUNT in Variables.');
+  }
 });

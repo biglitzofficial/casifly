@@ -6,6 +6,7 @@ import { signToken, authMiddleware } from '../middleware/auth.js';
 export const authRouter = Router();
 
 authRouter.post('/login', async (req, res) => {
+  try {
   const { email, password } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: 'Email and password required' });
@@ -55,6 +56,13 @@ authRouter.post('/login', async (req, res) => {
   }
 
   res.status(401).json({ error: 'Invalid email or password' });
+  } catch (err: any) {
+    console.error('Login error:', err?.message || err);
+    const msg = err?.message?.includes('Firestore not initialized')
+      ? 'Database not configured. Set FIREBASE_SERVICE_ACCOUNT.'
+      : 'Login failed';
+    res.status(503).json({ error: msg });
+  }
 });
 
 authRouter.get('/me', authMiddleware, (req, res) => {

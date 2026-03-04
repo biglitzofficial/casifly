@@ -11,6 +11,5 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: USE_FIRESTORE
-        value: "false"
-      # Add persistent disk via Render Dashboard for /data (paid plan)
-      # Then set DATA_DIR=/opt/render/project/src/data or your mount path
+        value: "true"
+      # FIREBASE_SERVICE_ACCOUNT: Add via Render Dashboard (full JSON string from Firebase Console)
