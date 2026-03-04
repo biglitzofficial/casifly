@@ -161,7 +161,11 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       toast.error(`Invalid Account IDs: ${invalidAccounts.map(e => e.accountId).join(', ')}`);
       return;
     }
-    const metadataWithStore: TransactionMetadata = { ...metadata, storeId: user?.productId ?? metadata?.storeId };
+    const metadataWithStore: TransactionMetadata = {
+      ...metadata,
+      storeId: user?.productId ?? metadata?.storeId,
+      ...(user?.role === 'user' ? { performedByUserId: user.id } : {}),
+    };
 
     if (USE_API) {
       api.postTransaction({ description, type, entries, metadata: metadataWithStore, date: dateStr })

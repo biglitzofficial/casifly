@@ -9,6 +9,7 @@ import { Ledgers } from './pages/Ledgers';
 import { Reports } from './pages/Reports';
 import { Masters } from './pages/Masters';
 import { Staff } from './pages/Staff';
+import { StaffAnalytics } from './pages/StaffAnalytics';
 import { CRM } from './pages/CRM';
 import { Profile } from './pages/Profile';
 import { Home } from './pages/Home';
@@ -22,7 +23,7 @@ import { ConfirmProvider } from './context/ConfirmContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 
-const views = ['dashboard','profile','staff','swipe-pay','pay-swipe','money-transfer','crm','ledgers','reports','masters'];
+const views = ['dashboard','profile','staff','staff-analytics','swipe-pay','pay-swipe','money-transfer','crm','ledgers','reports','masters'];
 
 const AppContent: React.FC = () => {
   const { user } = useAuth();
@@ -66,6 +67,7 @@ const AppContent: React.FC = () => {
       case 'dashboard': return <Dashboard onNavigate={setView} />;
       case 'profile': return <Profile />;
       case 'staff': return user?.role === 'product_admin' ? <Staff /> : <Dashboard onNavigate={setView} />;
+      case 'staff-analytics': return (user?.role === 'product_admin' || user?.role === 'user') ? <StaffAnalytics /> : <Dashboard onNavigate={setView} />;
       case 'swipe-pay': return <SwipePay />;
       case 'pay-swipe': return <PaySwipe />;
       case 'money-transfer': return <MoneyTransfer />;

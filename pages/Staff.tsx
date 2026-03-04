@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent, Input, Button } from '../components/ui/Elements';
-import { Plus, UserPlus, Trash2, X } from 'lucide-react';
+import { Plus, UserPlus, Trash2, X, Target } from 'lucide-react';
 import { useConfirm } from '../context/ConfirmContext';
+import { api, USE_API } from '../lib/api';
 
 export const Staff: React.FC = () => {
   const { addStaff, getStaffForCurrentStore, updateStaffStatus, removeStaff, products, user } = useAuth();
@@ -13,6 +14,10 @@ export const Staff: React.FC = () => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [targetModal, setTargetModal] = useState<{ staffId: string; staffName: string } | null>(null);
+  const [targetMonth, setTargetMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [targetAmount, setTargetAmount] = useState('');
+  const [targetSaving, setTargetSaving] = useState(false);
 
   const staff = getStaffForCurrentStore();
   const storeName = products.find((p) => p.id === user?.productId)?.name;
@@ -44,6 +49,23 @@ export const Staff: React.FC = () => {
       variant: 'danger',
     });
     if (ok) removeStaff(id);
+  };
+
+  const handleSetTarget = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!targetModal || !USE_API) return;
+    const amount = parseFloat(targetAmount.replace(/,/g, ''));
+    if (isNaN(amount) || amount < 0) return;
+    setTargetSaving(true);
+    try {
+      await api.setStaffTarget(targetModal.staffId, targetMonth, amount);
+      setTargetModal(null);
+      setTargetAmount('');
+    } catch (err: any) {
+      setErrors({ form: err?.message || 'Failed to set target' });
+    } finally {
+      setTargetSaving(false);
+    }
   };
 
   return (
@@ -104,6 +126,16 @@ export const Staff: React.FC = () => {
                       <p className="text-sm text-slate-500">{u.email}</p>
                     </div>
                     <div className="flex items-center gap-2">
+                      {USE_API && (
+                        <button
+                          onClick={() => setTargetModal({ staffId: u.id, staffName: u.name })}
+                          className="flex items-center gap-1.5 px-3 py-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg font-semibold text-sm"
+                          title="Set monthly target"
+                        >
+                          <Target size={16} />
+                          Set Target
+                        </button>
+                      )}
                       <select
                         className="text-xs px-2 py-1 rounded-lg border dark:bg-slate-800 dark:border-slate-600"
                         value={u.status}
@@ -122,6 +154,45 @@ export const Staff: React.FC = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* Set Target Modal */}
+        {targetModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[9999] p-4" onClick={() => setTargetModal(null)}>
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-700" onClick={e => e.stopPropagation()}>
+              <div className="p-6 border-b border-slate-200 dark:border-slate-700">
+                <h2 className="text-xl font-bold flex items-center gap-2">
+                  <Target className="w-5 h-5 text-indigo-600" />
+                  Set Monthly Target
+                </h2>
+                <p className="text-sm text-slate-500 mt-1">For {targetModal.staffName}</p>
+              </div>
+              <form onSubmit={handleSetTarget} className="p-6 space-y-4">
+                <Input
+                  label="Month"
+                  type="month"
+                  value={targetMonth}
+                  onChange={e => setTargetMonth(e.target.value)}
+                  required
+                />
+                <Input
+                  label="Target (₹)"
+                  type="number"
+                  min={0}
+                  step={1000}
+                  value={targetAmount}
+                  onChange={e => setTargetAmount(e.target.value)}
+                  placeholder="e.g. 50000"
+                  required
+                />
+                {errors.form && <p className="text-sm text-rose-600 font-bold">{errors.form}</p>}
+                <div className="flex gap-3">
+                  <Button type="submit" disabled={targetSaving}>{targetSaving ? 'Saving...' : 'Set Target'}</Button>
+                  <Button type="button" variant="outline" onClick={() => setTargetModal(null)}>Cancel</Button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </Layout>
   );

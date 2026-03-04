@@ -243,4 +243,18 @@ export const firestoreDb = {
     await fs().collection(C.transactions).doc(data.id).set(data);
     return data;
   },
+
+  // Staff Targets
+  async getStaffTargets(storeId: string, month?: string) {
+    let snap = fs().collection('staff_targets').where('store_id', '==', storeId);
+    if (month) snap = snap.where('month', '==', month);
+    const result = await snap.get();
+    return result.docs.map((d: { id: string; data: () => any }) => ({ ...d.data(), id: d.id }));
+  },
+
+  async setStaffTarget(storeId: string, staffId: string, month: string, target: number) {
+    const id = `${storeId}_${staffId}_${month}`;
+    await fs().collection('staff_targets').doc(id).set({ store_id: storeId, staff_id: staffId, month, target });
+    return { storeId, staffId, month, target };
+  },
 };

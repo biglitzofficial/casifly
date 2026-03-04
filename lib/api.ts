@@ -135,6 +135,28 @@ export const api = {
     const data = await fetchApi<{ balance: number }>(`/erp/balance/${accountId}`);
     return data.balance;
   },
+
+  async getStaffTargets(month?: string) {
+    const q = month ? `?month=${encodeURIComponent(month)}` : '';
+    return fetchApi<{ storeId: string; staffId: string; month: string; target: number }[]>(`/erp/staff-targets${q}`);
+  },
+
+  async setStaffTarget(staffId: string, month: string, target: number) {
+    return fetchApi<{ storeId: string; staffId: string; month: string; target: number }>('/erp/staff-targets', {
+      method: 'POST',
+      body: JSON.stringify({ staffId, month, target }),
+    });
+  },
+
+  async getStaffAnalytics(opts?: { month?: string; dateFrom?: string; dateTo?: string; staffId?: string }) {
+    const params = new URLSearchParams();
+    if (opts?.month) params.set('month', opts.month);
+    if (opts?.dateFrom) params.set('dateFrom', opts.dateFrom);
+    if (opts?.dateTo) params.set('dateTo', opts.dateTo);
+    if (opts?.staffId) params.set('staffId', opts.staffId);
+    const q = params.toString() ? `?${params}` : '';
+    return fetchApi<{ staffId: string; staffName: string; month: string; target: number; achieved: number; percentage: number; transactionCount: number }[]>(`/erp/staff-analytics${q}`);
+  },
 };
 
 export const USE_API = import.meta.env.VITE_USE_API === 'true' || import.meta.env.VITE_USE_API === '1';

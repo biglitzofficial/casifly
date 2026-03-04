@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../lib/utils';
 import { Input } from './Elements';
-import { Calendar, ChevronUp, ChevronDown, Search } from 'lucide-react';
+import { Calendar, ChevronUp, ChevronDown, ChevronRight, Search } from 'lucide-react';
 
 export type DatePreset = 'today' | 'yesterday' | 'last7' | 'thisMonth' | 'lastMonth' | 'allTime' | 'custom';
 
@@ -143,62 +143,75 @@ export const DateRangePicker: React.FC<{
         createPortal(
           <div
             ref={dropdownRef}
-            className="fixed z-[99999] flex bg-white dark:bg-slate-800 rounded-2xl border-2 border-slate-200 dark:border-slate-600 shadow-2xl overflow-hidden animate-fade-in min-w-[320px]"
+            className={cn(
+              'fixed z-[99999] flex bg-white dark:bg-slate-800 rounded-2xl border-2 border-slate-200 dark:border-slate-600 shadow-2xl overflow-hidden animate-fade-in',
+              preset === 'custom' ? 'min-w-[320px]' : 'min-w-[160px]'
+            )}
             style={{ top: position.top, left: position.left }}
           >
             {/* Left: Presets */}
-          <div className="w-40 border-r border-slate-100 dark:border-slate-600 bg-slate-50/50 dark:bg-slate-900/50 p-2">
-            {(['today', 'yesterday', 'last7', 'thisMonth', 'lastMonth', 'allTime', 'custom'] as DatePreset[]).map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => handlePresetClick(p)}
-                className={cn(
-                  'w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-between',
-                  preset === p || (p === 'custom' && preset === 'custom')
-                    ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/25'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
-                )}
-              >
-                {p === 'today' && 'Today'}
-                {p === 'yesterday' && 'Yesterday'}
-                {p === 'last7' && 'Last 7 Days'}
-                {p === 'thisMonth' && 'This Month'}
-                {p === 'lastMonth' && 'Last Month'}
-                {p === 'allTime' && 'All Time'}
-                {p === 'custom' && 'Custom Range'}
-              </button>
-            ))}
-          </div>
-          {/* Right: Custom date inputs */}
-          <div className="p-4 flex flex-col gap-4 min-w-[200px]">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">From</label>
-              <input
-                type="date"
-                value={customFrom}
-                onChange={e => setCustomFrom(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 dark:text-slate-100 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
-              />
+            <div className={cn(
+              'w-40 p-2 bg-slate-50/50 dark:bg-slate-900/50',
+              preset === 'custom' && 'border-r border-slate-100 dark:border-slate-600'
+            )}>
+              {(['today', 'yesterday', 'last7', 'thisMonth', 'lastMonth', 'allTime', 'custom'] as DatePreset[]).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => handlePresetClick(p)}
+                  className={cn(
+                    'w-full text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-between',
+                    preset === p || (p === 'custom' && preset === 'custom')
+                      ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/25'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+                  )}
+                >
+                  {p === 'today' && 'Today'}
+                  {p === 'yesterday' && 'Yesterday'}
+                  {p === 'last7' && 'Last 7 Days'}
+                  {p === 'thisMonth' && 'This Month'}
+                  {p === 'lastMonth' && 'Last Month'}
+                  {p === 'allTime' && 'All Time'}
+                  {p === 'custom' && (
+                    <>
+                      <span>Custom Range</span>
+                      <ChevronRight className="w-4 h-4 opacity-75" />
+                    </>
+                  )}
+                </button>
+              ))}
             </div>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">To</label>
-              <input
-                type="date"
-                value={customTo}
-                onChange={e => setCustomTo(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 dark:text-slate-100 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleApplyCustom}
-              className="w-full py-2.5 rounded-xl bg-indigo-500 text-white font-bold text-sm hover:bg-indigo-600 transition-colors shadow-lg shadow-indigo-500/25"
-            >
-              Apply
-            </button>
-          </div>
-        </div>,
+            {/* Right: Custom date inputs - only visible when Custom Range is selected */}
+            {preset === 'custom' && (
+              <div className="p-4 flex flex-col gap-4 min-w-[200px]">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">FROM</label>
+                  <input
+                    type="date"
+                    value={customFrom}
+                    onChange={e => setCustomFrom(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 dark:text-slate-100 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">TO</label>
+                  <input
+                    type="date"
+                    value={customTo}
+                    onChange={e => setCustomTo(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 dark:text-slate-100 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleApplyCustom}
+                  className="w-full py-2.5 rounded-xl bg-indigo-500 text-white font-bold text-sm hover:bg-indigo-600 transition-colors shadow-lg shadow-indigo-500/25"
+                >
+                  APPLY
+                </button>
+              </div>
+            )}
+          </div>,
           document.body
         )}
     </div>

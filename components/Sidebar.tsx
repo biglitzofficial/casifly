@@ -14,7 +14,8 @@ import {
   Menu,
   X,
   Sun,
-  Moon
+  Moon,
+  BarChart3
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -36,9 +37,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, storeUse
   };
   const { products, logout } = useAuth();
   const storeName = storeUser?.productId ? products.find(p => p.id === storeUser.productId)?.name : null;
+  const analyticsItem = storeUser && (storeUser.role === 'product_admin' || storeUser.role === 'user')
+    ? { id: 'staff-analytics' as const, label: storeUser.role === 'product_admin' ? 'Staff Analytics' : 'My Analytics', icon: BarChart3 }
+    : null;
   const baseMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'profile', label: 'Profile', icon: UserCircle },
+    ...(analyticsItem ? [analyticsItem] : []),
     { id: 'swipe-pay', label: 'Swipe & Pay', icon: CreditCard },
     { id: 'pay-swipe', label: 'Pay & Swipe', icon: ArrowLeftRight },
     { id: 'money-transfer', label: 'Money Transfer', icon: Banknote },

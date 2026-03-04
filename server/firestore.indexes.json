@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "staff_targets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "store_id", "order": "ASCENDING" },
+        { "fieldPath": "month", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "product_users",
       "queryScope": "COLLECTION",
       "fields": [

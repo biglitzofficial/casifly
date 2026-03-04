@@ -206,7 +206,8 @@ erpRouter.post('/transactions', async (req, res) => {
     res.status(400).json({ error: 'Transaction must balance' });
     return;
   }
-  const meta = { ...metadata, storeId: user.productId || metadata?.storeId };
+  const meta: any = { ...metadata, storeId: user.productId || metadata?.storeId };
+  if (user.role === 'user') meta.performedByUserId = user.id; // Track staff who performed transaction
   const id = uuid();
   const dateStr = date || new Date().toISOString();
   await db.addTransaction({ id, date: dateStr, description, type, entries: JSON.stringify(entries), status: 'COMPLETED', metadata: JSON.stringify(meta), reference_id: metadata?.customerId || null });
@@ -219,6 +220,154 @@ erpRouter.post('/transactions', async (req, res) => {
     status: 'COMPLETED',
     metadata: meta,
   });
+});
+
+// Staff targets (store admin only)
+erpRouter.get('/staff-targets', async (req, res) => {
+  const user = (req as any).user;
+  const storeId = user.productId;
+  if (!storeId) {
+    res.status(403).json({ error: 'Store context required' });
+    return;
+  }
+  const { month } = req.query;
+  const rows = await db.getStaffTargets(storeId, month as string);
+  res.json(rows.map((r: any) => ({ storeId: r.store_id, staffId: r.staff_id, month: r.month, target: r.target })));
+});
+
+erpRouter.post('/staff-targets', async (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== 'product_admin') {
+    res.status(403).json({ error: 'Only store admin can set targets' });
+    return;
+  }
+  const storeId = user.productId;
+  if (!storeId) {
+    res.status(403).json({ error: 'Store context required' });
+    return;
+  }
+  const { staffId, month, target } = req.body;
+  if (!staffId || !month || typeof target !== 'number') {
+    res.status(400).json({ error: 'staffId, month, and target required' });
+    return;
+  }
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    res.status(400).json({ error: 'month must be YYYY-MM' });
+    return;
+  }
+  await db.setStaffTarget(storeId, staffId, month, target);
+  res.json({ storeId, staffId, month, target });
+});
+
+// Staff analytics - staff sees own, admin sees all
+// Supports month (YYYY-MM) or dateFrom/dateTo (YYYY-MM-DD) for custom range
+erpRouter.get('/staff-analytics', async (req, res) => {
+  const user = (req as any).user;
+  const storeId = user.productId;
+  if (!storeId) {
+    res.status(403).json({ error: 'Store context required' });
+    return;
+  }
+  const { month, staffId, dateFrom, dateTo } = req.query;
+
+  let startDate: string;
+  let endDate: string;
+  let rangeLabel: string;
+
+  if (dateFrom && dateTo) {
+    const from = (dateFrom as string).trim();
+    const to = (dateTo as string).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      res.status(400).json({ error: 'dateFrom and dateTo must be YYYY-MM-DD' });
+      return;
+    }
+    startDate = new Date(from + 'T00:00:00.000Z').toISOString();
+    endDate = new Date(to + 'T23:59:59.999Z').toISOString();
+    if (startDate > endDate) {
+      res.status(400).json({ error: 'dateFrom must be before dateTo' });
+      return;
+    }
+    rangeLabel = `${from} to ${to}`;
+  } else {
+    const monthStr = (month as string) || new Date().toISOString().slice(0, 7);
+    const [year, mon] = monthStr.split('-').map(Number);
+    startDate = new Date(year, mon - 1, 1).toISOString();
+    endDate = new Date(year, mon, 0, 23, 59, 59).toISOString();
+    rangeLabel = monthStr;
+  }
+
+  const staffIds = staffId ? [staffId as string] : null;
+
+  const [txns, allTargets, productUsers] = await Promise.all([
+    db.getTransactions(storeId),
+    db.getStaffTargets(storeId), // Get all targets; we'll filter by month overlap
+    (db as any).getProductUsers?.(storeId) ?? Promise.resolve([]),
+  ]);
+
+  const staffNames: Record<string, string> = {};
+  (productUsers as any[]).forEach((u: any) => { staffNames[u.id] = u.name || u.email; });
+
+  const byStaff: Record<string, { achieved: number; count: number }> = {};
+  const incomeAccounts = ['I001', 'I002'];
+
+  for (const t of txns as any[]) {
+    if (t.status !== 'COMPLETED') continue;
+    const date = t.date || '';
+    if (date < startDate || date > endDate) continue;
+    const meta = t.metadata ? (typeof t.metadata === 'string' ? JSON.parse(t.metadata || '{}') : t.metadata) : {};
+    const performerId = meta.performedByUserId;
+    if (!performerId) continue;
+    if (staffIds && !staffIds.includes(performerId)) continue;
+
+    const entries = typeof t.entries === 'string' ? JSON.parse(t.entries) : t.entries;
+    let revenue = 0;
+    for (const e of entries) {
+      if (incomeAccounts.includes(e.accountId)) revenue += e.credit || 0;
+    }
+    if (revenue > 0) {
+      byStaff[performerId] = byStaff[performerId] || { achieved: 0, count: 0 };
+      byStaff[performerId].achieved += revenue;
+      byStaff[performerId].count += 1;
+    }
+  }
+
+  const targetMap: Record<string, number> = {};
+  (allTargets as any[]).forEach((t: any) => {
+    const [y, m] = (t.month || '').split('-').map(Number);
+    if (!y || !m) return;
+    const monthStart = new Date(y, m - 1, 1).getTime();
+    const monthEnd = new Date(y, m, 0, 23, 59, 59).getTime();
+    if (new Date(startDate).getTime() <= monthEnd && new Date(endDate).getTime() >= monthStart) {
+      targetMap[t.staff_id] = (targetMap[t.staff_id] || 0) + t.target;
+    }
+  });
+
+  // Include staff from targets, transactions, AND all product users (so newly created staff appear)
+  const allStaffIds = new Set([...Object.keys(byStaff), ...Object.keys(targetMap)]);
+  (productUsers as any[]).forEach((u: any) => {
+    if (u.role === 'user') allStaffIds.add(u.id); // staff only (excludes product_admin)
+  });
+  if (staffIds?.length) {
+    staffIds.forEach(id => allStaffIds.add(id));
+    allStaffIds.forEach(id => { if (!staffIds!.includes(id)) allStaffIds.delete(id); });
+  }
+
+  const result = Array.from(allStaffIds).map((sid) => {
+    const data = byStaff[sid] || { achieved: 0, count: 0 };
+    const targetVal = targetMap[sid] || 0;
+    const pct = targetVal > 0 ? Math.round((data.achieved / targetVal) * 100) : (data.achieved > 0 ? 100 : 0);
+    return {
+      staffId: sid,
+      staffName: staffNames[sid] || sid,
+      month: rangeLabel,
+      target: targetVal,
+      achieved: data.achieved,
+      percentage: pct,
+      transactionCount: data.count,
+    };
+  });
+
+  res.json(result);
 });
 
 erpRouter.get('/balance/:accountId', async (req, res) => {

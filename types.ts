@@ -99,6 +99,24 @@ export interface TransactionMetadata {
   cardType?: string;
   relatedTransactionId?: string;
   storeId?: string; // Product/store id for analytics
+  performedByUserId?: string; // Staff who executed the transaction (for analytics)
+}
+
+export interface StaffTarget {
+  storeId: string;
+  staffId: string;
+  month: string; // YYYY-MM
+  target: number; // Monthly revenue target in ₹
+}
+
+export interface StaffAnalytics {
+  staffId: string;
+  staffName: string;
+  month: string;
+  target: number;
+  achieved: number; // Revenue from transactions performed by this staff
+  percentage: number;
+  transactionCount: number;
 }
 
 export interface Transaction {

@@ -1,8 +1,35 @@
 # FinLedger API
 
-Node.js + Express backend with SQLite.
+Node.js + Express backend with **Firestore** (default) or **SQLite**.
 
-## Setup
+## Firestore Setup
+
+1. **Create Firebase project**  
+   Go to [Firebase Console](https://console.firebase.google.com/) → Your Project → Project Settings → Service Accounts.
+
+2. **Generate service account key**  
+   Click "Generate new private key" and save the JSON file.
+
+3. **Add credentials**
+   - Copy the JSON file to the `server` folder, or
+   - Set env vars in `server/.env`:
+     ```
+     USE_FIRESTORE=true
+     GOOGLE_APPLICATION_CREDENTIALS=./your-firebase-adminsdk-xxxxx.json
+     ```
+     Or for serverless, set `FIREBASE_SERVICE_ACCOUNT` to the full JSON string.
+
+4. **Seed Firestore**
+   ```bash
+   cd server
+   npm install
+   npm run seed:firestore   # Creates master admin + initial data
+   npm run dev              # Start on port 3001
+   ```
+
+## SQLite Setup
+
+Set `USE_FIRESTORE=false` and run:
 
 ```bash
 cd server

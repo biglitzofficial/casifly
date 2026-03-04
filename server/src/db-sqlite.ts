@@ -21,6 +21,7 @@ sqlite.exec(`CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, date 
 sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date)`);
 sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_customers_store ON customers(store_id)`);
 sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_wallets_store ON wallets(store_id)`);
+sqlite.exec(`CREATE TABLE IF NOT EXISTS staff_targets (store_id TEXT NOT NULL, staff_id TEXT NOT NULL, month TEXT NOT NULL, target REAL NOT NULL, PRIMARY KEY (store_id, staff_id, month))`);
 
 // Async adapter - wraps sync SQLite in Promises for unified interface
 export const sqliteDb = {
@@ -162,6 +163,18 @@ export const sqliteDb = {
   addTransaction: (data: any) => {
     sqlite.prepare('INSERT INTO transactions (id, date, description, type, entries, status, metadata, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(data.id, data.date, data.description, data.type, data.entries, data.status, data.metadata, data.reference_id);
     return Promise.resolve(data);
+  },
+
+  getStaffTargets: (storeId: string, month?: string) => {
+    const rows = month
+      ? sqlite.prepare('SELECT * FROM staff_targets WHERE store_id = ? AND month = ?').all(storeId, month)
+      : sqlite.prepare('SELECT * FROM staff_targets WHERE store_id = ?').all(storeId);
+    return Promise.resolve((rows as any[]).map(r => ({ store_id: r.store_id, staff_id: r.staff_id, month: r.month, target: r.target })));
+  },
+
+  setStaffTarget: (storeId: string, staffId: string, month: string, target: number) => {
+    sqlite.prepare('INSERT OR REPLACE INTO staff_targets (store_id, staff_id, month, target) VALUES (?, ?, ?, ?)').run(storeId, staffId, month, target);
+    return Promise.resolve({ storeId, staffId, month, target });
   },
 
   close: () => sqlite.close(),
