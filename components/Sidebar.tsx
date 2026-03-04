@@ -40,22 +40,39 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, storeUse
   const analyticsItem = storeUser && (storeUser.role === 'product_admin' || storeUser.role === 'user')
     ? { id: 'staff-analytics' as const, label: storeUser.role === 'product_admin' ? 'Staff Analytics' : 'My Analytics', icon: BarChart3 }
     : null;
-  const baseMenuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'profile', label: 'Profile', icon: UserCircle },
-    ...(analyticsItem ? [analyticsItem] : []),
-    { id: 'swipe-pay', label: 'Swipe & Pay', icon: CreditCard },
-    { id: 'pay-swipe', label: 'Pay & Swipe', icon: ArrowLeftRight },
-    { id: 'money-transfer', label: 'Money Transfer', icon: Banknote },
-    { id: 'crm', label: 'CRM & Customers', icon: Users },
-    { id: 'ledgers', label: 'Ledgers', icon: BookOpen },
-    { id: 'reports', label: 'Reports & P&L', icon: PieChart },
-    { id: 'masters', label: 'Masters', icon: Settings },
+
+  const sections = [
+    {
+      heading: 'Main',
+      items: [
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { id: 'swipe-pay', label: 'Swipe & Pay', icon: CreditCard },
+        { id: 'pay-swipe', label: 'Pay & Swipe', icon: ArrowLeftRight },
+        { id: 'money-transfer', label: 'Money Transfer', icon: Banknote },
+      ],
+    },
+    ...(storeUser?.role === 'product_admin'
+      ? [{
+          heading: 'Staff',
+          items: [
+            { id: 'staff', label: 'Staff', icon: UserPlus },
+            ...(analyticsItem ? [analyticsItem] : []),
+          ],
+        }]
+      : analyticsItem
+        ? [{ heading: 'Staff', items: [analyticsItem] }]
+        : []),
+    {
+      heading: 'CRM & More',
+      items: [
+        { id: 'crm', label: 'CRM & Customers', icon: Users },
+        { id: 'ledgers', label: 'Ledgers', icon: BookOpen },
+        { id: 'reports', label: 'Reports & P&L', icon: PieChart },
+        { id: 'masters', label: 'Masters', icon: Settings },
+        { id: 'profile', label: 'Profile', icon: UserCircle },
+      ],
+    },
   ];
-  const staffItem = { id: 'staff', label: 'Staff', icon: UserPlus };
-  const menuItems = storeUser?.role === 'product_admin'
-    ? [...baseMenuItems.slice(0, 2), staffItem, ...baseMenuItems.slice(2)]
-    : baseMenuItems;
 
   return (
     <>
@@ -75,45 +92,49 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, storeUse
       
       <div className="relative h-20 flex items-center justify-between px-6 border-b border-white/5 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-600 flex items-center justify-center font-black text-white text-xl shadow-lg shadow-indigo-500/40">
-              F
-            </div>
-            <div className="absolute -inset-1 rounded-2xl bg-indigo-500/20 blur-xl -z-10" />
-          </div>
-          <span className="text-xl font-bold text-white tracking-tight">FINLEDGER</span>
+            <img src="/logo.png" alt="CASIFLY" className="h-12 w-auto object-contain" />
+          <span className="text-xl font-bold text-white tracking-tight">CASIFLY</span>
         </div>
         <button onClick={onMobileToggle} className="md:hidden p-2 -mr-2 text-slate-400 hover:text-white" aria-label="Close menu">
           <X size={24} />
         </button>
       </div>
       <nav className="relative flex-1 overflow-y-auto py-6 px-4">
-        <ul className="space-y-1">
-          {menuItems.map((item, i) => {
-            const Icon = item.icon;
-            const isActive = currentView === item.id;
-            return (
-              <li key={item.id} className="animate-slide-up" style={{ animationDelay: `${i * 30}ms`, animationFillMode: 'both' }}>
-                <button
-                  onClick={() => handleNav(item.id)}
-                  className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-300 font-semibold ${
-                    isActive 
-                      ? 'bg-white/10 text-white shadow-lg shadow-indigo-500/10 border border-white/10' 
-                      : 'text-slate-400 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <div className={`p-2 rounded-xl transition-all duration-300 ${isActive ? 'bg-indigo-500/30' : 'bg-transparent group-hover:bg-white/10'}`}>
-                    <Icon size={20} className="shrink-0" />
-                  </div>
-                  <span>{item.label}</span>
-                  {isActive && (
-                    <div className="ml-auto w-1.5 h-1.5 rounded-full bg-indigo-400" />
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="space-y-6">
+          {sections.map((section, sIdx) => (
+            <div key={section.heading}>
+              <p className="px-4 mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+                {section.heading}
+              </p>
+              <ul className="space-y-1">
+                {section.items.map((item, i) => {
+                  const Icon = item.icon;
+                  const isActive = currentView === item.id;
+                  return (
+                    <li key={item.id} className="animate-slide-up" style={{ animationDelay: `${(sIdx * 10 + i) * 30}ms`, animationFillMode: 'both' }}>
+                      <button
+                        onClick={() => handleNav(item.id)}
+                        className={`group w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-300 font-semibold ${
+                          isActive 
+                            ? 'bg-white/10 text-white shadow-lg shadow-indigo-500/10 border border-white/10' 
+                            : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        <div className={`p-2 rounded-xl transition-all duration-300 ${isActive ? 'bg-indigo-500/30' : 'bg-transparent group-hover:bg-white/10'}`}>
+                          <Icon size={20} className="shrink-0" />
+                        </div>
+                        <span>{item.label}</span>
+                        {isActive && (
+                          <div className="ml-auto w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
       </nav>
       <div className="relative p-4 border-t border-white/5 text-xs text-slate-500 shrink-0">
         <div className="mb-3 space-y-2">

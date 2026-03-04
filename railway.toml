@@ -1,0 +1,11 @@
+[build]
+builder = "nixpacks"
+buildCommand = "npm run build:deploy"
+startCommand = "npm run start:deploy"
+watchPatterns = ["**/*.ts", "**/*.tsx", "**/*.js", "server/**"]
+
+[deploy]
+healthcheckPath = "/api/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

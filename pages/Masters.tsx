@@ -5,11 +5,13 @@ import { useConfirm } from '../context/ConfirmContext';
 import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent, Input, Button, Select } from '../components/ui/Elements';
 import { PageFilters } from '../components/ui/PageFilters';
-import { Plus, Save, Activity, Users, Wallet as WalletIcon, Edit2, Check, X, List, LayoutGrid, Trash2, Download, Upload } from 'lucide-react';
+import { Plus, Save, Activity, Users, Wallet as WalletIcon, Edit2, X, List, LayoutGrid, Trash2, Download, Upload, Building2 } from 'lucide-react';
 import { CreateCustomerDTO, CreateWalletDTO, PGConfig, Rates } from '../types';
 import { formatCurrency, safeParseFloat } from '../lib/utils';
+import { useAuth } from '../context/AuthContext';
+import { TransactionType } from '../types';
 
-type Tab = 'reconcile' | 'customers' | 'wallets' | 'data';
+type Tab = 'reconcile' | 'customers' | 'wallets' | 'banks' | 'data';
 
 export const Masters: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('reconcile');
@@ -20,6 +22,7 @@ export const Masters: React.FC = () => {
         <TabButton id="reconcile" active={activeTab} onClick={setActiveTab} icon={Activity} label="Reconciliation" />
         <TabButton id="customers" active={activeTab} onClick={setActiveTab} icon={Users} label="Customers" />
         <TabButton id="wallets" active={activeTab} onClick={setActiveTab} icon={WalletIcon} label="Wallets" />
+        <TabButton id="banks" active={activeTab} onClick={setActiveTab} icon={Building2} label="Banks & Cash" />
         <TabButton id="data" active={activeTab} onClick={setActiveTab} icon={Save} label="Backup & Restore" />
       </div>
 
@@ -27,6 +30,7 @@ export const Masters: React.FC = () => {
         {activeTab === 'reconcile' && <ReconciliationView />}
         {activeTab === 'customers' && <CustomersView />}
         {activeTab === 'wallets' && <WalletsView />}
+        {activeTab === 'banks' && <BanksCashView />}
         {activeTab === 'data' && <DataBackupView />}
       </div>
     </Layout>
@@ -58,7 +62,7 @@ const DataBackupView = () => {
     const blob = new Blob([json], { type: 'application/json' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `finledger-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `casifly-backup-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(link.href);
     toast.success('Backup exported successfully');
@@ -109,6 +113,182 @@ const DataBackupView = () => {
         <p className="text-xs text-slate-500 dark:text-slate-400">After restore, the page will reload to apply changes.</p>
       </CardContent>
     </Card>
+  );
+};
+
+const BanksCashView = () => {
+  const { accounts, wallets, addAccount, postTransaction, getAccountBalance, formatCurrency } = useERP();
+  const { user } = useAuth();
+  const toast = useToast();
+  const canCreateAccounts = user?.role === 'master_admin' || user?.role === 'product_admin';
+
+  const [newBankName, setNewBankName] = useState('');
+  const [newCashName, setNewCashName] = useState('');
+  const [addMoneyTarget, setAddMoneyTarget] = useState('');
+  const [addMoneyAmount, setAddMoneyAmount] = useState('');
+  const [addMoneySource, setAddMoneySource] = useState('Q001');
+  const [addMoneyError, setAddMoneyError] = useState('');
+
+  const bankAccounts = accounts.filter(a => a.category === 'Bank');
+  const cashAccounts = accounts.filter(a => a.category === 'Cash');
+  const walletLedgerIds = wallets.map(w => w.ledgerAccountId);
+  const walletAccounts = accounts.filter(a => a.category === 'Wallet' && walletLedgerIds.includes(a.id));
+
+  const targetOptions = [
+    ...bankAccounts.map(a => ({ id: a.id, name: `${a.name} (${formatCurrency(getAccountBalance(a.id))})`, category: 'Bank' })),
+    ...cashAccounts.map(a => ({ id: a.id, name: `${a.name} (${formatCurrency(getAccountBalance(a.id))})`, category: 'Cash' })),
+    ...walletAccounts.map(a => ({ id: a.id, name: `${a.name} (${formatCurrency(getAccountBalance(a.id))})`, category: 'Wallet' })),
+  ];
+
+  const sourceOptions = accounts.filter(a =>
+    a.category === 'Equity' || (['Bank', 'Cash'].includes(a.category) && a.id !== addMoneyTarget)
+  ).map(a => ({ id: a.id, name: `${a.name} (${formatCurrency(getAccountBalance(a.id))})` }));
+
+  const handleCreateBank = (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newBankName.trim();
+    if (!name) { toast.error('Bank name required'); return; }
+    addAccount({ name, category: 'Bank' });
+    setNewBankName('');
+    toast.success(`Bank "${name}" created`);
+  };
+
+  const handleCreateCash = (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newCashName.trim();
+    if (!name) { toast.error('Cash account name required'); return; }
+    addAccount({ name, category: 'Cash' });
+    setNewCashName('');
+    toast.success(`Cash account "${name}" created`);
+  };
+
+  const handleAddMoney = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddMoneyError('');
+    const amt = safeParseFloat(addMoneyAmount);
+    if (!addMoneyTarget) { setAddMoneyError('Select target account'); return; }
+    if (!addMoneySource) { setAddMoneyError('Select source account'); return; }
+    if (isNaN(amt) || amt <= 0) { setAddMoneyError('Enter a valid amount'); return; }
+    if (addMoneyTarget === addMoneySource) { setAddMoneyError('Target and source must be different'); return; }
+
+    const targetAcc = accounts.find(a => a.id === addMoneyTarget);
+    const sourceAcc = accounts.find(a => a.id === addMoneySource);
+    if (!targetAcc || !sourceAcc) { setAddMoneyError('Invalid account'); return; }
+
+    const entries = [
+      { accountId: addMoneyTarget, debit: amt, credit: 0 },
+      { accountId: addMoneySource, debit: 0, credit: amt },
+    ];
+    const targetLabel = targetOptions.find(o => o.id === addMoneyTarget)?.name?.split(' (')[0] || addMoneyTarget;
+    postTransaction(
+      `Add money to ${targetLabel}`,
+      TransactionType.JOURNAL,
+      entries,
+      undefined,
+      new Date().toISOString()
+    );
+    setAddMoneyTarget('');
+    setAddMoneyAmount('');
+    setAddMoneySource('Q001');
+    toast.success(`₹${amt.toLocaleString('en-IN')} added to ${targetLabel}`);
+  };
+
+  return (
+    <div className="space-y-8">
+      {canCreateAccounts && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader title="Create New Bank" subtitle="Add a new bank account to the chart of accounts" />
+            <CardContent>
+              <form onSubmit={handleCreateBank} className="flex gap-3">
+                <Input
+                  value={newBankName}
+                  onChange={e => setNewBankName(e.target.value)}
+                  placeholder="e.g. HDFC Bank Main"
+                  className="flex-1"
+                />
+                <Button type="submit">Create Bank</Button>
+              </form>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader title="Create New Cash Account" subtitle="Add cash drawer or petty cash account" />
+            <CardContent>
+              <form onSubmit={handleCreateCash} className="flex gap-3">
+                <Input
+                  value={newCashName}
+                  onChange={e => setNewCashName(e.target.value)}
+                  placeholder="e.g. Cash on Hand"
+                  className="flex-1"
+                />
+                <Button type="submit">Create Cash</Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <Card>
+        <CardHeader 
+          title="Add Money" 
+          subtitle="Add money to bank, wallet, or cash. Each store sees only their own transactions and balances." 
+        />
+        <CardContent>
+          <form onSubmit={handleAddMoney} className="space-y-4 max-w-xl">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Add to (Target)</label>
+              <Select
+                value={addMoneyTarget}
+                onChange={e => setAddMoneyTarget(e.target.value)}
+                options={[
+                  { value: '', label: '– Select account –' },
+                  ...targetOptions.map(o => ({ value: o.id, label: o.name })),
+                ]}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Amount (₹)</label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={addMoneyAmount}
+                onChange={e => { setAddMoneyAmount(e.target.value); setAddMoneyError(''); }}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">Source (Credit from)</label>
+              <Select
+                value={addMoneySource}
+                onChange={e => setAddMoneySource(e.target.value)}
+                options={[
+                  { value: '', label: '– Select source –' },
+                  ...sourceOptions.map(o => ({ value: o.id, label: o.name })),
+                ]}
+              />
+            </div>
+            {addMoneyError && <p className="text-sm text-rose-600">{addMoneyError}</p>}
+            <Button type="submit">Add Money</Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader title="Current Balances" subtitle="Store-scoped: balances reflect only transactions for your store" />
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {targetOptions.map(o => (
+              <div key={o.id} className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700">
+                <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">{o.category}</p>
+                <p className="font-semibold text-slate-800 dark:text-slate-200">{o.name.split(' (')[0]}</p>
+                <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">{formatCurrency(getAccountBalance(o.id))}</p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 };
 

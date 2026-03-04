@@ -3,9 +3,9 @@ import { AuthUser, Product, ProductUser, StoreType } from '../types';
 import { generateId } from '../lib/utils';
 import { api, USE_API } from '../lib/api';
 
-const MASTER_ADMIN_EMAIL = 'admin@finledger.com';
+const MASTER_ADMIN_EMAIL = 'admin@casifly.com';
 const MASTER_ADMIN_PASSWORD = 'Admin@123';
-const STORAGE_KEY = 'finledger_admin_data';
+const STORAGE_KEY = 'casifly_admin_data';
 
 interface AdminData {
   products: Product[];
@@ -76,7 +76,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const SESSION_KEY = 'finledger_session';
+const SESSION_KEY = 'casifly_session';
 
 const slugify = (s: string) => s.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
 
@@ -339,8 +339,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return { success: false, error: e?.message || 'Failed to add user' };
       }
     }
-    const exists = adminData.productUsers.some((u) => u.email.toLowerCase() === trimmedEmail && u.productId === productId);
-    if (exists) return { success: false, error: 'User already exists for this product' };
+    const existsInStore = adminData.productUsers.some((u) => u.email.toLowerCase() === trimmedEmail && u.productId === productId);
+    if (existsInStore) return { success: false, error: 'Email already registered for this store' };
+    const existsElsewhere = adminData.productUsers.some((u) => u.email.toLowerCase() === trimmedEmail);
+    if (existsElsewhere) return { success: false, error: 'Email already registered for another store' };
 
     const pu: ProductUser = {
       id: generateId('U'),

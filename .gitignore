@@ -32,3 +32,6 @@ firebase-service-account.json
 
 # Local SQLite data
 data/
+
+# Build output
+server/public/

@@ -45,9 +45,7 @@ export const MasterAdminSidebar: React.FC<MasterAdminSidebarProps> = ({
       >
         <div className="h-20 flex items-center justify-between px-6 border-b border-slate-200 dark:border-slate-700 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg">
-              <Store className="w-5 h-5 text-white" />
-            </div>
+            <img src="/logo.png" alt="CASIFLY" className="h-10 w-auto object-contain" />
             <div>
               <span className="text-base font-black text-slate-900 dark:text-white">Master Admin</span>
               {userEmail && (

@@ -1,27 +1,30 @@
 {
-  "name": "finledger-pro",
+  "name": "casifly",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:full": "concurrently \"npm run dev\" \"npm run dev:server\"",
+    "dev:full": "npx concurrently \"npm run dev\" \"npm run dev:server\"",
     "dev:server": "npm run dev --prefix server",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:deploy": "npm install --prefix server && npm run build && npx shx mkdir -p server/public && npx shx cp -r dist/* server/public/ && cd server && npm run build",
+    "start:deploy": "cd server && node dist/index.js"
   },
   "dependencies": {
+    "clsx": "^2.1.0",
     "lucide-react": "^0.563.0",
     "react": "^19.2.4",
-    "recharts": "^3.7.0",
     "react-dom": "^19.2.4",
-    "clsx": "^2.1.0",
+    "recharts": "^3.7.0",
     "tailwind-merge": "^2.2.0"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.1.0",
+    "shx": "^0.3.4",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

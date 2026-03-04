@@ -313,8 +313,8 @@ export const Reports: React.FC = () => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <Card>
                   <CardHeader title="Network Profitability Breakdown" />
-                  <CardContent className="h-80">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <CardContent className="h-80 min-h-[320px]">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
                       <BarChart data={cardStats}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
                         <XAxis dataKey="name" fontSize={11} axisLine={false} tickLine={false} />
@@ -327,8 +327,8 @@ export const Reports: React.FC = () => {
                 </Card>
                 <Card>
                   <CardHeader title="Top 10 Profitable Clients" />
-                  <CardContent className="h-80">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <CardContent className="h-80 min-h-[320px]">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
                       <BarChart data={customerStats} layout="vertical">
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                         <XAxis type="number" fontSize={11} axisLine={false} />

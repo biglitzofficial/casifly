@@ -1,12 +1,12 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 function getToken(): string | null {
-  return localStorage.getItem('finledger_token');
+  return localStorage.getItem('casifly_token');
 }
 
 function setToken(token: string | null) {
-  if (token) localStorage.setItem('finledger_token', token);
-  else localStorage.removeItem('finledger_token');
+  if (token) localStorage.setItem('casifly_token', token);
+  else localStorage.removeItem('casifly_token');
 }
 
 async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -81,6 +81,10 @@ export const api = {
 
   async getAccounts() {
     return fetchApi<unknown[]>('/erp/accounts');
+  },
+
+  async addAccount(body: { name: string; category: 'Bank' | 'Cash' }) {
+    return fetchApi<unknown>('/erp/accounts', { method: 'POST', body: JSON.stringify(body) });
   },
 
   async getCustomers() {

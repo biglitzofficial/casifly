@@ -28,6 +28,7 @@ interface ERPContextType {
   deleteWallet: (id: string) => void;
   addWalletPG: (walletId: string, pgConfig: PGConfig) => void;
   updateWalletPG: (walletId: string, oldPgName: string, pgConfig: PGConfig) => void;
+  addAccount: (data: { name: string; category: 'Bank' | 'Cash' }) => void;
 
   // Getters
   getAccountBalance: (accountId: string) => number;
@@ -44,7 +45,7 @@ interface ERPContextType {
 }
 
 const ERPContext = createContext<ERPContextType | undefined>(undefined);
-const ERP_STORAGE_KEY = 'finledger_erp_data';
+const ERP_STORAGE_KEY = 'casifly_erp_data';
 
 const loadERPFromStorage = () => {
   try {
@@ -318,6 +319,18 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }));
   };
 
+  const addAccount = (data: { name: string; category: 'Bank' | 'Cash' }) => {
+    if (USE_API) {
+      api.addAccount(data)
+        .then(() => refreshFromApi())
+        .catch((e: any) => toast.error(e?.message || 'Failed to add account'));
+      return;
+    }
+    const id = generateId('A');
+    const newAccount: Account = { id, name: data.name, type: AccountType.ASSET, category: data.category, balance: 0 };
+    setAccounts(prev => [...prev, newAccount]);
+  };
+
   const reconcileWallet = (walletId: string, actualBalance: number) => {
     const wallet = allWallets.find(w => w.id === walletId);
     if (!wallet) return;
@@ -393,7 +406,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const exportBackup = () => {
     const erp = { accounts, customers, wallets: allWallets, transactions };
-    const admin = localStorage.getItem('finledger_admin_data') || '{}';
+    const admin = localStorage.getItem('casifly_admin_data') || '{}';
     return JSON.stringify({ erp, admin: JSON.parse(admin), exportedAt: new Date().toISOString() }, null, 2);
   };
 
@@ -407,7 +420,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (Array.isArray(data.erp.transactions)) setTransactions(data.erp.transactions);
       }
       if (data.admin && typeof data.admin === 'object') {
-        localStorage.setItem('finledger_admin_data', JSON.stringify(data.admin));
+        localStorage.setItem('casifly_admin_data', JSON.stringify(data.admin));
       }
       return { success: true };
     } catch (e) {
@@ -434,6 +447,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       deleteWallet,
       addWalletPG,
       updateWalletPG,
+      addAccount,
       generateBalanceSheet,
       generateProfitAndLoss,
       exportBackup,

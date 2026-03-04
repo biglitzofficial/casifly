@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { ArrowRight, Store, ArrowLeft, Sparkles, TrendingUp, CreditCard, BarChart3 } from 'lucide-react';
+import { ArrowRight, ArrowLeft, TrendingUp, CreditCard, BarChart3 } from 'lucide-react';
 
 interface StoreLoginProps {
   onBackToHome?: () => void;
@@ -70,14 +70,7 @@ export const StoreLogin: React.FC<StoreLoginProps> = ({ onBackToHome }) => {
                 <div className="p-8 md:p-10">
                   {/* Header */}
                   <div className="flex items-center gap-4 mb-8">
-                    <div className="relative">
-                      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 via-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
-                        <Store className="w-8 h-8 text-white" />
-                      </div>
-                      <div className="absolute -top-1 -right-1 w-5 h-5 rounded-lg bg-indigo-400/20 flex items-center justify-center">
-                        <Sparkles className="w-3 h-3 text-indigo-300" />
-                      </div>
-                    </div>
+                    <img src="/logo.png" alt="CASIFLY" className="h-14 w-auto object-contain" />
                     <div>
                       <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
                         Store Login
@@ -165,7 +158,8 @@ export const StoreLogin: React.FC<StoreLoginProps> = ({ onBackToHome }) => {
             <div className="relative">
               <div className="aspect-[4/3] bg-slate-800/90 rounded-2xl p-2 shadow-2xl border border-slate-700/80 backdrop-blur-sm">
                 <div className="h-full bg-slate-900/95 rounded-xl overflow-hidden">
-                  <div className="h-10 bg-gradient-to-r from-indigo-500 to-violet-600 flex items-center justify-center">
+                  <div className="h-10 bg-gradient-to-r from-indigo-500 to-violet-600 flex items-center justify-center gap-2 px-2">
+                    <img src="/logo.png" alt="CASIFLY" className="h-6 w-auto object-contain" />
                     <span className="font-bold text-white text-sm tracking-wider">STORE DASHBOARD</span>
                   </div>
                   <div className="p-3 grid grid-cols-2 gap-2">

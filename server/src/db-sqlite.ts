@@ -4,9 +4,9 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.join(__dirname, '..', '..', 'data');
+const dataDir = process.env.DATA_DIR || path.join(__dirname, '..', '..', 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-const dbPath = path.join(dataDir, 'finledger.db');
+const dbPath = path.join(dataDir, 'casifly.db');
 
 export const rawDb = new Database(dbPath);
 const sqlite = rawDb;
@@ -14,7 +14,17 @@ const sqlite = rawDb;
 sqlite.exec(`CREATE TABLE IF NOT EXISTS products (id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, description TEXT, status TEXT DEFAULT 'active', store_type TEXT DEFAULT 'other', created_at TEXT NOT NULL)`);
 sqlite.exec(`CREATE TABLE IF NOT EXISTS product_users (id TEXT PRIMARY KEY, product_id TEXT NOT NULL, email TEXT NOT NULL, password_hash TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, status TEXT DEFAULT 'active', created_at TEXT NOT NULL, FOREIGN KEY (product_id) REFERENCES products(id))`);
 sqlite.exec(`CREATE TABLE IF NOT EXISTS master_admin (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, name TEXT NOT NULL)`);
-sqlite.exec(`CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, category TEXT NOT NULL, balance REAL DEFAULT 0)`);
+sqlite.exec(`CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, category TEXT NOT NULL, balance REAL DEFAULT 0, store_id TEXT)`);
+(() => {
+  try {
+    const cols = (sqlite.prepare('PRAGMA table_info(accounts)').all() as { name: string }[]);
+    if (!cols.some((c) => c.name === 'store_id')) {
+      sqlite.exec('ALTER TABLE accounts ADD COLUMN store_id TEXT');
+      sqlite.exec(`UPDATE accounts SET store_id = 'P0001' WHERE category IN ('Bank','Cash') AND id != 'A001' AND (store_id IS NULL OR store_id = '')`);
+    }
+  } catch (_) {}
+})();
+sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_accounts_store ON accounts(store_id)`);
 sqlite.exec(`CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT NOT NULL, commission_rates TEXT NOT NULL, ledger_account_id TEXT NOT NULL, store_id TEXT, joined_at TEXT, FOREIGN KEY (ledger_account_id) REFERENCES accounts(id))`);
 sqlite.exec(`CREATE TABLE IF NOT EXISTS wallets (id TEXT PRIMARY KEY, name TEXT NOT NULL, ledger_account_id TEXT NOT NULL, pgs TEXT NOT NULL, store_id TEXT, FOREIGN KEY (ledger_account_id) REFERENCES accounts(id))`);
 sqlite.exec(`CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, date TEXT NOT NULL, description TEXT NOT NULL, type TEXT NOT NULL, entries TEXT NOT NULL, status TEXT DEFAULT 'COMPLETED', metadata TEXT, reference_id TEXT)`);
@@ -75,10 +85,14 @@ export const sqliteDb = {
     return Promise.resolve({ ok: true });
   },
 
-  getAccounts: () => Promise.resolve(sqlite.prepare('SELECT * FROM accounts').all() as any[]),
+  getAccounts: (storeId?: string) => {
+    const rows = sqlite.prepare('SELECT * FROM accounts').all() as any[];
+    if (!storeId) return Promise.resolve(rows);
+    return Promise.resolve(rows.filter((r) => r.store_id == null || r.store_id === storeId));
+  },
   getAccount: (id: string) => Promise.resolve(sqlite.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as any),
   addAccount: (data: any) => {
-    sqlite.prepare('INSERT INTO accounts (id, name, type, category, balance) VALUES (?, ?, ?, ?, ?)').run(data.id, data.name, data.type, data.category, data.balance);
+    sqlite.prepare('INSERT INTO accounts (id, name, type, category, balance, store_id) VALUES (?, ?, ?, ?, ?, ?)').run(data.id, data.name, data.type, data.category, data.balance ?? 0, data.store_id ?? null);
     return Promise.resolve();
   },
   updateAccount: (id: string, updates: any) => {

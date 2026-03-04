@@ -106,9 +106,13 @@ export const firestoreDb = {
   },
 
   // Accounts
-  async getAccounts() {
+  async getAccounts(storeId?: string) {
     const snap = await fs().collection(C.accounts).get();
-    return snap.docs.map((d: { id: string; data: () => any }) => ({ ...d.data(), id: d.id }));
+    let rows = snap.docs.map((d: { id: string; data: () => any }) => ({ ...d.data(), id: d.id }));
+    if (storeId) {
+      rows = rows.filter((r: any) => r.store_id == null || r.store_id === storeId);
+    }
+    return rows;
   },
 
   async getAccount(id: string) {
@@ -116,8 +120,8 @@ export const firestoreDb = {
     return doc.exists ? { ...doc.data(), id: doc.id } : null;
   },
 
-  async addAccount(data: { id: string; name: string; type: string; category: string; balance: number }) {
-    await fs().collection(C.accounts).doc(data.id).set(data);
+  async addAccount(data: { id: string; name: string; type: string; category: string; balance: number; store_id?: string | null }) {
+    await fs().collection(C.accounts).doc(data.id).set({ ...data, store_id: data.store_id ?? null });
   },
 
   async updateAccount(id: string, updates: Record<string, unknown>) {

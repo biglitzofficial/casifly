@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
 type Theme = 'light' | 'dark';
-const STORAGE_KEY = 'finledger_theme';
+const STORAGE_KEY = 'casifly_theme';
 
 interface ThemeContextType {
   theme: Theme;

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useERP } from '../context/ERPContext';
 import { Layout } from '../components/Layout';
 import { Input, Button } from '../components/ui/Elements';
-import { Wallet, TrendingUp, TrendingDown, DollarSign, Sparkles, X, UserPlus } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, DollarSign, Sparkles, X, UserPlus, ChevronLeft, ChevronRight, Receipt } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { CreateCustomerDTO } from '../types';
 import { safeParseFloat } from '../lib/utils';
@@ -25,8 +25,11 @@ const validateAddCustomer = (data: CreateCustomerDTO, existingPhones: string[]) 
   return err;
 };
 
+const WALLET_LOW_THRESHOLD = 10000;
+const RECENT_TXN_PAGE_SIZE = 15;
+
 export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ onNavigate }) => {
-  const { accounts, wallets, customers, addCustomer, formatCurrency, getAccountBalance } = useERP();
+  const { accounts, wallets, transactions, customers, addCustomer, formatCurrency, getAccountBalance } = useERP();
   const [showCashSummary, setShowCashSummary] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
   const [addUserForm, setAddUserForm] = useState<CreateCustomerDTO>({
@@ -35,14 +38,15 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
     commissionRates: { ...DEFAULT_COMMISSION_RATES }
   });
   const [addUserErrors, setAddUserErrors] = useState<Record<string, string>>({});
-
-  const totalCash = getAccountBalance('A001');
-  const totalBank = getAccountBalance('A002') + getAccountBalance('A003');
-  const totalWallet = wallets.reduce((sum, w) => sum + getAccountBalance(w.ledgerAccountId), 0);
-  const totalIncome = getAccountBalance('I001') + getAccountBalance('I002');
+  const [txPage, setTxPage] = useState(1);
 
   const cashAccounts = accounts.filter(a => a.category === 'Cash');
   const bankAccounts = accounts.filter(a => a.category === 'Bank');
+
+  const totalCash = cashAccounts.reduce((sum, a) => sum + getAccountBalance(a.id), 0);
+  const totalBank = bankAccounts.reduce((sum, a) => sum + getAccountBalance(a.id), 0);
+  const totalWallet = wallets.reduce((sum, w) => sum + getAccountBalance(w.ledgerAccountId), 0);
+  const totalIncome = getAccountBalance('I001') + getAccountBalance('I002');
 
   const walletData = wallets.map(w => ({
     name: w.name,
@@ -50,6 +54,14 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
   }));
 
   const grandTotal = totalCash + totalBank + totalWallet;
+
+  const lowBalanceWallets = wallets.filter(w => getAccountBalance(w.ledgerAccountId) < WALLET_LOW_THRESHOLD);
+  const pendingTxnsCount = transactions.filter(t => t.status === 'PENDING').length;
+
+  const sortedTxns = [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const totalTxPages = Math.max(1, Math.ceil(sortedTxns.length / RECENT_TXN_PAGE_SIZE));
+  const effectivePage = Math.min(Math.max(1, txPage), totalTxPages);
+  const paginatedTxns = sortedTxns.slice((effectivePage - 1) * RECENT_TXN_PAGE_SIZE, effectivePage * RECENT_TXN_PAGE_SIZE);
 
   return (
     <Layout
@@ -114,8 +126,8 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
             <div className="p-2 bg-indigo-100 rounded-xl"><TrendingUp className="w-4 h-4 text-indigo-600" /></div>
             Wallet Liquidity Overview
           </h2>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="w-full min-h-[320px]" style={{ height: 320 }}>
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
               <BarChart data={walletData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12, fontWeight: 600}} />
@@ -168,17 +180,106 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
 
             <h2 className="text-xl font-bold text-slate-900 mt-10 mb-4 tracking-tight">System Alerts</h2>
             <div className="space-y-4">
-              <div className="flex items-start gap-4 p-5 bg-gradient-to-r from-rose-50 to-rose-50/50 border border-rose-200/80 rounded-2xl group hover:shadow-lg hover:shadow-rose-500/10 transition-all">
-                 <div className="w-3 h-3 rounded-full bg-rose-500 mt-1.5 shrink-0 shadow-lg shadow-rose-500/40" />
-                 <p className="font-bold text-rose-800">Wallet B is running low on balance (Below ₹10,000).</p>
-              </div>
-              <div className="flex items-start gap-4 p-5 bg-gradient-to-r from-amber-50 to-amber-50/50 border border-amber-200/80 rounded-2xl group hover:shadow-lg hover:shadow-amber-500/10 transition-all">
-                 <div className="w-3 h-3 rounded-full bg-amber-500 mt-1.5 shrink-0 shadow-lg shadow-amber-500/40" />
-                 <p className="font-bold text-amber-800">3 Transactions pending approval.</p>
-              </div>
+              {lowBalanceWallets.map(w => (
+                <div key={w.id} className="flex items-start gap-4 p-5 bg-gradient-to-r from-rose-50 to-rose-50/50 border border-rose-200/80 rounded-2xl group hover:shadow-lg hover:shadow-rose-500/10 transition-all">
+                  <div className="w-3 h-3 rounded-full bg-rose-500 mt-1.5 shrink-0 shadow-lg shadow-rose-500/40" />
+                  <p className="font-bold text-rose-800">
+                    {w.name} is running low on balance ({formatCurrency(getAccountBalance(w.ledgerAccountId))} – below ₹{WALLET_LOW_THRESHOLD.toLocaleString('en-IN')}).
+                  </p>
+                </div>
+              ))}
+              {pendingTxnsCount > 0 && (
+                <div className="flex items-start gap-4 p-5 bg-gradient-to-r from-amber-50 to-amber-50/50 border border-amber-200/80 rounded-2xl group hover:shadow-lg hover:shadow-amber-500/10 transition-all">
+                  <div className="w-3 h-3 rounded-full bg-amber-500 mt-1.5 shrink-0 shadow-lg shadow-amber-500/40" />
+                  <p className="font-bold text-amber-800">{pendingTxnsCount} Transaction{pendingTxnsCount !== 1 ? 's' : ''} pending approval.</p>
+                </div>
+              )}
+              {lowBalanceWallets.length === 0 && pendingTxnsCount === 0 && (
+                <p className="text-slate-500 dark:text-slate-400 font-medium py-4">No alerts at the moment.</p>
+              )}
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Recent Transactions */}
+      <div className="mt-10 bg-white/95 backdrop-blur-md rounded-3xl border-2 border-slate-100/80 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.06)] overflow-hidden transition-all duration-300">
+        <div className="p-6 border-b border-slate-100/80 flex flex-wrap items-center justify-between gap-4">
+          <h2 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <div className="p-2 bg-indigo-100 rounded-xl"><Receipt className="w-4 h-4 text-indigo-600" /></div>
+            Recent Transactions
+          </h2>
+          <button
+            type="button"
+            onClick={() => onNavigate?.('ledgers')}
+            className="text-sm font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+          >
+            View all in Ledgers →
+          </button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider">Date</th>
+                <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider">Description</th>
+                <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider">Type</th>
+                <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider text-right">Debit</th>
+                <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider text-right">Credit</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {paginatedTxns.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-12 text-center text-slate-500 font-medium">
+                    No transactions yet.
+                  </td>
+                </tr>
+              ) : (
+                paginatedTxns.map((txn, idx) => {
+                  const totalDr = txn.entries.reduce((s, e) => s + (e.debit || 0), 0);
+                  const totalCr = txn.entries.reduce((s, e) => s + (e.credit || 0), 0);
+                  return (
+                    <tr key={txn.id} className={`hover:bg-indigo-50/30 transition-colors duration-150 ${idx % 2 === 1 ? 'bg-slate-50/50' : ''}`}>
+                      <td className="p-4 text-sm text-slate-600 font-medium">{new Date(txn.date).toLocaleDateString()}</td>
+                      <td className="p-4 text-sm font-semibold text-slate-800">{txn.description}</td>
+                      <td className="p-4 text-xs">
+                        <span className="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 font-semibold">{txn.type}</span>
+                      </td>
+                      <td className="p-4 text-sm text-right font-medium text-slate-600">{totalDr > 0 ? formatCurrency(totalDr) : '-'}</td>
+                      <td className="p-4 text-sm text-right font-medium text-slate-600">{totalCr > 0 ? formatCurrency(totalCr) : '-'}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+        {sortedTxns.length > RECENT_TXN_PAGE_SIZE && (
+          <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-4 bg-slate-50/50">
+            <p className="text-sm text-slate-600 font-medium">
+              Page {effectivePage} of {totalTxPages} • {sortedTxns.length} total
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setTxPage(p => Math.max(1, p - 1))}
+                disabled={effectivePage <= 1}
+                className="p-2 rounded-xl border border-slate-200 hover:bg-white hover:border-indigo-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold text-slate-700"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTxPage(p => Math.min(totalTxPages, p + 1))}
+                disabled={effectivePage >= totalTxPages}
+                className="p-2 rounded-xl border border-slate-200 hover:bg-white hover:border-indigo-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-semibold text-slate-700"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {showAddUser && (

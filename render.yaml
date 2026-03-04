@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: casifly
+    env: node
+    region: oregon
+    buildCommand: npm run build:deploy
+    startCommand: npm run start:deploy
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: USE_FIRESTORE
+        value: "false"
+      # Add persistent disk via Render Dashboard for /data (paid plan)
+      # Then set DATA_DIR=/opt/render/project/src/data or your mount path

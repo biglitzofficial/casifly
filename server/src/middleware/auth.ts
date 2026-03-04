@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'finledger-dev-secret-change-in-prod';
+const JWT_SECRET = process.env.JWT_SECRET || 'casifly-dev-secret-change-in-prod';
 
 export interface JWTPayload {
   id: string;

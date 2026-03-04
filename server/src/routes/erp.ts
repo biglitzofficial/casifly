@@ -11,8 +11,39 @@ function getId(prefix: string) {
 }
 
 erpRouter.get('/accounts', async (req, res) => {
-  const rows = await db.getAccounts();
+  const user = (req as any).user;
+  const storeId = user.productId ?? undefined;
+  const rows = await db.getAccounts(storeId);
   res.json(rows.map((a: any) => ({ id: a.id, name: a.name, type: a.type, category: a.category, balance: a.balance || 0 })));
+});
+
+erpRouter.post('/accounts', async (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== 'master_admin' && user.role !== 'product_admin') {
+    res.status(403).json({ error: 'Master Admin or Store Admin required to create bank or cash accounts' });
+    return;
+  }
+  const { name, category } = req.body;
+  if (!name?.trim()) {
+    res.status(400).json({ error: 'Account name required' });
+    return;
+  }
+  const cat = (category || 'Bank').toLowerCase();
+  if (cat !== 'bank' && cat !== 'cash') {
+    res.status(400).json({ error: 'Category must be Bank or Cash' });
+    return;
+  }
+  const id = getId('A');
+  const categoryTitle = cat === 'bank' ? 'Bank' : 'Cash';
+  const storeId = user.productId ?? null;
+  await db.addAccount({ id, name: name.trim(), type: 'ASSET', category: categoryTitle, balance: 0, store_id: storeId });
+  res.json({
+    id,
+    name: name.trim(),
+    type: 'ASSET',
+    category: categoryTitle,
+    balance: 0,
+  });
 });
 
 erpRouter.get('/customers', async (req, res) => {

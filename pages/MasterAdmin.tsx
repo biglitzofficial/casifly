@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Card, CardHeader, CardContent, Input, Button } from '../components/ui/Elements';
 import { Store, Plus, Trash2, ChevronDown, ChevronRight, X, Menu } from 'lucide-react';
@@ -22,7 +22,20 @@ export const MasterAdmin: React.FC = () => {
     deleteProductUser,
   } = useAuth();
 
-  const [activeView, setActiveView] = useState<'analytics' | 'stores' | 'wallet'>('analytics');
+  const MASTER_VIEW_KEY = 'casifly_master_view';
+  const masterViews = ['analytics', 'stores', 'wallet'] as const;
+  const getInitialMasterView = (): 'analytics' | 'stores' | 'wallet' => {
+    try {
+      const s = localStorage.getItem(MASTER_VIEW_KEY);
+      if (s && masterViews.includes(s as any)) return s as typeof masterViews[number];
+    } catch (_) {}
+    return 'analytics';
+  };
+  const [activeView, setActiveViewState] = useState<'analytics' | 'stores' | 'wallet'>(getInitialMasterView);
+  const setActiveView = useCallback((v: 'analytics' | 'stores' | 'wallet') => {
+    setActiveViewState(v);
+    try { localStorage.setItem(MASTER_VIEW_KEY, v); } catch (_) {}
+  }, []);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
   const [showAddProduct, setShowAddProduct] = useState(false);

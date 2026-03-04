@@ -24,11 +24,24 @@ import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 
 const views = ['dashboard','profile','staff','staff-analytics','swipe-pay','pay-swipe','money-transfer','crm','ledgers','reports','masters'];
+const VIEW_STORAGE_KEY = 'casifly_view';
+
+const getInitialView = () => {
+  try {
+    const saved = localStorage.getItem(VIEW_STORAGE_KEY);
+    if (saved && views.includes(saved)) return saved;
+  } catch (_) {}
+  return 'dashboard';
+};
 
 const AppContent: React.FC = () => {
   const { user } = useAuth();
   const [landingView, setLandingView] = useState<'home' | 'store-login' | 'distributor-login'>('home');
-  const [currentView, setView] = useState('dashboard');
+  const [currentView, setViewState] = useState(getInitialView);
+  const setView = React.useCallback((view: string) => {
+    setViewState(view);
+    try { localStorage.setItem(VIEW_STORAGE_KEY, view); } catch (_) {}
+  }, []);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
@@ -60,7 +73,7 @@ const AppContent: React.FC = () => {
     if (landingView === 'distributor-login') return <DistributorLogin onBackToHome={() => setLandingView('home')} />;
     return <Home onNavigateToLogin={(type) => setLandingView(type === 'store' ? 'store-login' : 'distributor-login')} />;
   }
-  if (user.role === 'master_admin') return <MasterAdmin />;
+  if (user.role === 'master_admin') return <ERPProvider><MasterAdmin /></ERPProvider>;
 
   const renderView = () => {
     switch(currentView) {

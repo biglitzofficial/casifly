@@ -115,16 +115,22 @@ productsRouter.post('/:id/users', async (req, res) => {
     return;
   }
   const effectiveRole = user.role === 'product_admin' ? 'user' : (role || 'user');
-  const existing = await db.getProductUserByEmailAndProduct(email.trim().toLowerCase(), productId);
-  if (existing) {
+  const trimmedEmail = email.trim().toLowerCase();
+  const existingInStore = await db.getProductUserByEmailAndProduct(trimmedEmail, productId);
+  if (existingInStore) {
     res.status(400).json({ error: 'Email already registered for this store' });
+    return;
+  }
+  const existingElsewhere = await db.getProductUserByEmail(trimmedEmail, 'active');
+  if (existingElsewhere) {
+    res.status(400).json({ error: 'Email already registered for another store' });
     return;
   }
   const hash = await bcrypt.hash(password.trim(), 10);
   const uid = uuid().slice(0, 8);
   const createdAt = new Date().toISOString();
-  await db.addProductUser({ id: uid, product_id: productId, email: email.trim().toLowerCase(), password_hash: hash, name: name.trim(), role: effectiveRole, status: 'active', created_at: createdAt });
-  res.json({ id: uid, productId, email: email.trim().toLowerCase(), name: name.trim(), role: effectiveRole, status: 'active', createdAt });
+  await db.addProductUser({ id: uid, product_id: productId, email: trimmedEmail, password_hash: hash, name: name.trim(), role: effectiveRole, status: 'active', created_at: createdAt });
+  res.json({ id: uid, productId, email: trimmedEmail, name: name.trim(), role: effectiveRole, status: 'active', createdAt });
 });
 
 productsRouter.put('/:productId/users/:userId', async (req, res) => {

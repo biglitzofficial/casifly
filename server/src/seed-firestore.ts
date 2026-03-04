@@ -1,25 +1,26 @@
 import bcrypt from 'bcryptjs';
 import { initFirestore, USE_FIRESTORE, getFirestore } from './firestore.js';
 
-const MASTER_EMAIL = 'admin@finledger.com';
+const MASTER_EMAIL = 'admin@casifly.com';
 const MASTER_PASSWORD = 'Admin@123';
 
+const DEFAULT_STORE_ID = 'P0001';
 const INITIAL_ACCOUNTS = [
-  { id: 'A001', name: 'Cash on Hand', type: 'ASSET', category: 'Cash', balance: 500000 },
-  { id: 'A002', name: 'HDFC Bank Main', type: 'ASSET', category: 'Bank', balance: 1200000 },
-  { id: 'A003', name: 'ICICI Bank Ops', type: 'ASSET', category: 'Bank', balance: 800000 },
-  { id: 'A004', name: 'Wallet A (Razorpay)', type: 'ASSET', category: 'Wallet', balance: 0 },
-  { id: 'A005', name: 'Wallet B (Paytm)', type: 'ASSET', category: 'Wallet', balance: 0 },
-  { id: 'A006', name: 'Customer Receivables', type: 'ASSET', category: 'Customer', balance: 0 },
-  { id: 'L001', name: 'Customer Payables', type: 'LIABILITY', category: 'Customer', balance: 0 },
-  { id: 'L002', name: 'Duties & Taxes', type: 'LIABILITY', category: 'Revenue', balance: 0 },
-  { id: 'Q001', name: "Owner's Equity", type: 'LIABILITY', category: 'Equity', balance: 1000000 },
-  { id: 'Q002', name: 'Retained Earnings', type: 'LIABILITY', category: 'Equity', balance: 1500000 },
-  { id: 'I001', name: 'Service Charges', type: 'INCOME', category: 'Revenue', balance: 0 },
-  { id: 'I002', name: 'Wallet Surplus', type: 'INCOME', category: 'Revenue', balance: 0 },
-  { id: 'E001', name: 'Wallet MDR Charges', type: 'EXPENSE', category: 'Expense', balance: 0 },
-  { id: 'E002', name: 'Wallet Deficit', type: 'EXPENSE', category: 'Expense', balance: 0 },
-  { id: 'E003', name: 'Office Rent', type: 'EXPENSE', category: 'Expense', balance: 0 },
+  { id: 'A001', name: 'Cash on Hand', type: 'ASSET', category: 'Cash', balance: 500000, store_id: null },
+  { id: 'A002', name: 'HDFC Bank Main', type: 'ASSET', category: 'Bank', balance: 1200000, store_id: DEFAULT_STORE_ID },
+  { id: 'A003', name: 'ICICI Bank Ops', type: 'ASSET', category: 'Bank', balance: 800000, store_id: DEFAULT_STORE_ID },
+  { id: 'A004', name: 'Wallet A (Razorpay)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
+  { id: 'A005', name: 'Wallet B (Paytm)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
+  { id: 'A006', name: 'Customer Receivables', type: 'ASSET', category: 'Customer', balance: 0, store_id: null },
+  { id: 'L001', name: 'Customer Payables', type: 'LIABILITY', category: 'Customer', balance: 0, store_id: null },
+  { id: 'L002', name: 'Duties & Taxes', type: 'LIABILITY', category: 'Revenue', balance: 0, store_id: null },
+  { id: 'Q001', name: "Owner's Equity", type: 'LIABILITY', category: 'Equity', balance: 1000000, store_id: null },
+  { id: 'Q002', name: 'Retained Earnings', type: 'LIABILITY', category: 'Equity', balance: 1500000, store_id: null },
+  { id: 'I001', name: 'Service Charges', type: 'INCOME', category: 'Revenue', balance: 0, store_id: null },
+  { id: 'I002', name: 'Wallet Surplus', type: 'INCOME', category: 'Revenue', balance: 0, store_id: null },
+  { id: 'E001', name: 'Wallet MDR Charges', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
+  { id: 'E002', name: 'Wallet Deficit', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
+  { id: 'E003', name: 'Office Rent', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
 ];
 
 const INITIAL_CUSTOMERS = [

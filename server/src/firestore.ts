@@ -27,7 +27,7 @@ export function initFirestore(): admin.firestore.Firestore | null {
 
   try {
     const credsJson = process.env.FIREBASE_SERVICE_ACCOUNT;
-    let credsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    let credsPath: string | null | undefined = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     if (!credsPath) credsPath = defaultCredsFile();
 
     if (credsJson) {

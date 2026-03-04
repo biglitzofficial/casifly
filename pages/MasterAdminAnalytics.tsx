@@ -1,33 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useERP } from '../context/ERPContext';
 import { Card, CardHeader, CardContent, Input, Button } from '../components/ui/Elements';
 import { BarChart3, TrendingUp, Wallet, Store, Filter, Trophy, Award } from 'lucide-react';
 import { Product, Transaction, TransactionMetadata } from '../types';
 import { formatCurrency } from '../lib/utils';
 
-const ERP_STORAGE_KEY = 'finledger_erp_data';
 const INCOME_ACCOUNTS = ['I001', 'I002']; // Service Charges, Wallet Surplus
-
-interface ERPData {
-  accounts?: { id: string }[];
-  wallets?: { id: string; name: string }[];
-  transactions?: Transaction[];
-}
-
-const loadERPData = (): ERPData => {
-  try {
-    const raw = localStorage.getItem(ERP_STORAGE_KEY);
-    if (raw) {
-      const data = JSON.parse(raw);
-      return {
-        accounts: data.accounts || [],
-        wallets: data.wallets || [],
-        transactions: data.transactions || [],
-      };
-    }
-  } catch (_) {}
-  return { accounts: [], wallets: [], transactions: [] };
-};
 
 const getRevenueFromTransaction = (txn: Transaction): number => {
   if (txn.status !== 'COMPLETED') return 0;
@@ -44,15 +23,11 @@ const parseDate = (s: string) => {
 
 export const MasterAdminAnalytics: React.FC = () => {
   const { products } = useAuth();
+  const { transactions, wallets } = useERP();
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [storeFilter, setStoreFilter] = useState<string>('all');
   const [storeTypeFilter, setStoreTypeFilter] = useState<string>('all');
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  const erpData = useMemo(loadERPData, [refreshKey]);
-  const transactions = erpData.transactions || [];
-  const wallets = erpData.wallets || [];
 
   const productMap = useMemo(() => {
     const m: Record<string, Product> = {};
@@ -142,11 +117,6 @@ export const MasterAdminAnalytics: React.FC = () => {
           action={<Filter className="w-5 h-5 text-slate-400" />}
         />
         <CardContent>
-          <div className="flex flex-wrap items-end gap-4 mb-4">
-          <Button variant="outline" size="sm" onClick={() => setRefreshKey(k => k + 1)}>
-            Refresh Data
-          </Button>
-          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Input
               label="From Date"

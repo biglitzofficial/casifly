@@ -23,7 +23,7 @@ const coreServices = [
   {
     icon: ArrowLeftRight,
     title: 'Money Transfer',
-    description: 'Transfer funds effortlessly between accounts. FinLedger ensures quick, compliant, and safe money transfers for both business and personal needs. Send and receive with confidence.',
+    description: 'Transfer funds effortlessly between accounts. CASIFLY ensures quick, compliant, and safe money transfers for both business and personal needs. Send and receive with confidence.',
   },
 ];
 
@@ -61,13 +61,8 @@ export const Home: React.FC<HomeProps> = ({ onNavigateToLogin }) => {
       <header className="fixed top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shrink-0">
-              <Store className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <span className="text-xl font-black text-slate-900 tracking-tight">FIN</span>
-              <span className="text-xl font-black text-amber-600 tracking-tight">LEDGER</span>
-            </div>
+            <img src="/logo.png" alt="CASIFLY" className="h-10 w-auto object-contain shrink-0" />
+            <span className="text-xl font-black text-slate-900 tracking-tight">CASIFLY</span>
           </div>
 
           <button
@@ -146,10 +141,10 @@ export const Home: React.FC<HomeProps> = ({ onNavigateToLogin }) => {
               Financial ERP | Swipe & Pay | Ledgers
             </p>
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold text-slate-900 leading-tight tracking-tight">
-              Become a FinLedger Partner and Start Earning Today.
+              Become a CASIFLY Partner and Start Earning Today.
             </h1>
             <p className="text-lg text-slate-600 max-w-xl leading-relaxed">
-              Partner with FinLedger and experience the future of digital payments. Empower your business with seamless Swipe & Pay, Ledgers, Reports, and start earning today!
+              Partner with CASIFLY and experience the future of digital payments. Empower your business with seamless Swipe & Pay, Ledgers, Reports, and start earning today!
             </p>
             <Button
               onClick={() => scrollTo('contact')}
@@ -167,8 +162,8 @@ export const Home: React.FC<HomeProps> = ({ onNavigateToLogin }) => {
                 {/* Screen content - dark dashboard mock */}
                 <div className="h-full bg-slate-900 rounded-xl overflow-hidden">
                   {/* Top Banner */}
-                  <div className="h-12 bg-amber-500 flex items-center justify-center">
-                    <span className="font-black text-white text-lg tracking-wider">FINLEDGER</span>
+                  <div className="h-12 bg-amber-500 flex items-center justify-center px-2">
+                    <img src="/logo.png" alt="CASIFLY" className="h-8 w-auto object-contain" />
                   </div>
                   {/* Dashboard content */}
                   <div className="p-4 grid grid-cols-2 gap-4">
@@ -410,7 +405,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigateToLogin }) => {
 
             <div className="border-t border-white/10 mt-12 pt-8">
               <p className="text-center text-sm text-white/70">
-                © Copyright FinLedger Powered by : Zylinx Tech Pvt Ltd All Rights Reserved
+                © Copyright CASIFLY Powered by : Zylinx Tech Pvt Ltd All Rights Reserved
               </p>
             </div>
           </div>

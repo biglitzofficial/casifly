@@ -1,4 +1,4 @@
-# FinLedger API
+# CASIFLY API
 
 Node.js + Express backend with **Firestore** (default) or **SQLite**.
 
@@ -52,7 +52,7 @@ npm run dev    # Start on port 3001
 
 ## Default credentials
 
-- **Master Admin:** admin@finledger.com / Admin@123
+- **Master Admin:** admin@casifly.com / Admin@123
 
 ## Frontend
 

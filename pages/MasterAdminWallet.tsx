@@ -7,7 +7,7 @@ import { formatCurrency, generateId } from '../lib/utils';
 import { safeParseFloat } from '../lib/utils';
 import { useConfirm } from '../context/ConfirmContext';
 
-const ERP_STORAGE_KEY = 'finledger_erp_data';
+const ERP_STORAGE_KEY = 'casifly_erp_data';
 
 interface ERPData {
   accounts: Account[];
