@@ -253,6 +253,19 @@ erpRouter.post('/transactions', async (req, res) => {
   });
 });
 
+erpRouter.delete('/transactions/:id', async (req, res) => {
+  const user = (req as any).user;
+  const { id } = req.params;
+  const rows = await db.getTransactions(user.productId);
+  const txn = (rows as any[]).find((t: any) => t.id === id);
+  if (!txn) {
+    res.status(404).json({ error: 'Transaction not found' });
+    return;
+  }
+  await db.deleteTransaction(id);
+  res.json({ ok: true });
+});
+
 // Staff targets (store admin only)
 erpRouter.get('/staff-targets', async (req, res) => {
   const user = (req as any).user;

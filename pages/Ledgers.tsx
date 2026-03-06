@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useERP } from '../context/ERPContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { Layout } from '../components/Layout';
 import { Transaction, TransactionType } from '../types';
 import { PageFilters, DateRange } from '../components/ui/PageFilters';
-import { X, Info, Download, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Info, Download, RotateCcw, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { exportToCSV } from '../lib/export';
 import { Button } from '../components/ui/Elements';
 
@@ -20,7 +21,8 @@ const ALL_ACCOUNTS = '__all__';
 const PAGE_SIZE = 15;
 
 export const Ledgers: React.FC = () => {
-  const { accounts, wallets, transactions, getAccountBalance, formatCurrency } = useERP();
+  const { accounts, wallets, transactions, getAccountBalance, formatCurrency, deleteTransaction } = useERP();
+  const { confirm } = useConfirm();
   const [selectedAccount, setSelectedAccount] = useState(ALL_ACCOUNTS);
   const [viewingTxn, setViewingTxn] = useState<Transaction | null>(null);
   const [search, setSearch] = useState('');
@@ -231,13 +233,13 @@ export const Ledgers: React.FC = () => {
                   )}
                   <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider text-right">Debit</th>
                   <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider text-right">Credit</th>
-                  <th className="p-4 w-12"></th>
+                  <th className="p-4 w-24"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {paginatedTxns.length === 0 ? (
                   <tr>
-                    <td colSpan={showAllAccounts ? 7 : 6} className="p-12 text-center text-slate-500 font-medium">
+                    <td colSpan={showAllAccounts ? 8 : 7} className="p-12 text-center text-slate-500 font-medium">
                       No transactions found{showAllAccounts ? '.' : ' for this account.'}
                     </td>
                   </tr>
@@ -256,12 +258,28 @@ export const Ledgers: React.FC = () => {
                           <td className="p-4 text-sm text-right font-medium text-slate-600">{entry.debit > 0 ? formatCurrency(entry.debit) : '-'}</td>
                           <td className="p-4 text-sm text-right font-medium text-slate-600">{entry.credit > 0 ? formatCurrency(entry.credit) : '-'}</td>
                           <td className="p-4 text-right">
-                            <button 
-                              onClick={() => setViewingTxn(txn)}
-                              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
-                            >
-                              <Info size={18} />
-                            </button>
+                            <div className="flex items-center justify-end gap-1">
+                              <button 
+                                onClick={() => setViewingTxn(txn)}
+                                className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
+                                title="View details"
+                              >
+                                <Info size={18} />
+                              </button>
+                              {eIdx === 0 && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const ok = await confirm({ title: 'Delete Transaction', message: `Permanently delete "${txn.description}"? This will remove it from all ledgers.`, confirmText: 'Delete', variant: 'danger' });
+                                    if (ok) deleteTransaction(txn.id);
+                                  }}
+                                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
+                                  title="Delete transaction"
+                                >
+                                  <Trash2 size={18} />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -281,12 +299,26 @@ export const Ledgers: React.FC = () => {
                         <td className="p-4 text-sm text-right font-medium text-slate-600">{entry.debit > 0 ? formatCurrency(entry.debit) : '-'}</td>
                         <td className="p-4 text-sm text-right font-medium text-slate-600">{entry.credit > 0 ? formatCurrency(entry.credit) : '-'}</td>
                         <td className="p-4 text-right">
-                          <button 
-                            onClick={() => setViewingTxn(txn)}
-                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
-                          >
-                            <Info size={18} />
-                          </button>
+                          <div className="flex items-center justify-end gap-1">
+                            <button 
+                              onClick={() => setViewingTxn(txn)}
+                              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
+                              title="View details"
+                            >
+                              <Info size={18} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const ok = await confirm({ title: 'Delete Transaction', message: `Permanently delete "${txn.description}"? This will remove it from all ledgers.`, confirmText: 'Delete', variant: 'danger' });
+                                if (ok) deleteTransaction(txn.id);
+                              }}
+                              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
+                              title="Delete transaction"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

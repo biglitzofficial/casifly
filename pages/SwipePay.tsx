@@ -23,7 +23,8 @@ export const SwipePay: React.FC = () => {
   const [step2Errors, setStep2Errors] = useState<Record<string, string>>({});
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [isNewCustomer, setIsNewCustomer] = useState(false);
-  const [commissionRates, setCommissionRates] = useState<Rates>(DEFAULT_COMMISSION_RATES);
+  const toRateStrings = (r: Rates) => ({ visa: String(r.visa), master: String(r.master), amex: String(r.amex), rupay: String(r.rupay) });
+  const [commissionRates, setCommissionRates] = useState<Record<keyof Rates, string>>(toRateStrings(DEFAULT_COMMISSION_RATES));
 
   const [swipeWalletId, setSwipeWalletId] = useState(wallets[0]?.id || '');
   const [pgName, setPgName] = useState('');
@@ -46,8 +47,8 @@ export const SwipePay: React.FC = () => {
   }, [swipeWalletId, selectedWallet]);
 
   useEffect(() => {
-    const rate = (commissionRates as any)[cardType] || 0;
-    setCurrentServiceRate(rate.toString());
+    const rate = commissionRates[cardType as keyof Rates] ?? '0';
+    setCurrentServiceRate(String(rate));
   }, [cardType, commissionRates]);
 
   const handlePhoneSearch = () => {
@@ -56,13 +57,13 @@ export const SwipePay: React.FC = () => {
     if (found) {
       setCustomerId(found.id);
       setCustomerName(found.name);
-      setCommissionRates(found.commissionRates);
+      setCommissionRates(toRateStrings(found.commissionRates));
       setIsNewCustomer(false);
       setIsPhoneLocked(true);
     } else {
       setCustomerId(null);
       setCustomerName(''); 
-      setCommissionRates(DEFAULT_COMMISSION_RATES);
+      setCommissionRates(toRateStrings(DEFAULT_COMMISSION_RATES));
       setIsNewCustomer(true);
       setIsPhoneLocked(true);
     }
@@ -85,13 +86,20 @@ export const SwipePay: React.FC = () => {
     setStep1Errors(err);
     if (Object.keys(err).length > 0) return;
 
+    const parsedRates: Rates = {
+      visa: safeParseFloat(commissionRates.visa),
+      master: safeParseFloat(commissionRates.master),
+      amex: safeParseFloat(commissionRates.amex),
+      rupay: safeParseFloat(commissionRates.rupay)
+    };
     const newId = await addCustomer({
       name: customerName,
       phone,
-      commissionRates: commissionRates
+      commissionRates: parsedRates
     });
     if (!newId) return;
     setCustomerId(newId);
+    setCommissionRates(toRateStrings(parsedRates));
     setIsNewCustomer(false); // Switch to "swipe" mode for this existing customer
   };
 
@@ -123,7 +131,13 @@ export const SwipePay: React.FC = () => {
     if (Object.keys(err).length > 0 || !selectedWallet || !customerId) return;
 
     // Update customer rates if the specific one was edited during this transaction
-    const updatedRates = { ...commissionRates, [cardType]: serviceRateVal };
+    const parsedRates: Rates = {
+      visa: safeParseFloat(commissionRates.visa),
+      master: safeParseFloat(commissionRates.master),
+      amex: safeParseFloat(commissionRates.amex),
+      rupay: safeParseFloat(commissionRates.rupay)
+    };
+    const updatedRates = { ...parsedRates, [cardType]: serviceRateVal };
     updateCustomer(customerId, { commissionRates: updatedRates });
 
     const entries: LedgerEntry[] = [
@@ -185,7 +199,7 @@ export const SwipePay: React.FC = () => {
   const updateNewCustRate = (type: keyof Rates, val: string) => {
     setCommissionRates(prev => ({
       ...prev,
-      [type]: safeParseFloat(val)
+      [type]: val
     }));
   };
 

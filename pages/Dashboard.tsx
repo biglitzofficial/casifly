@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { useERP } from '../context/ERPContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { Layout } from '../components/Layout';
 import { Input, Button } from '../components/ui/Elements';
-import { Wallet, TrendingUp, TrendingDown, DollarSign, Sparkles, X, UserPlus, ChevronLeft, ChevronRight, Receipt } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, DollarSign, Sparkles, X, UserPlus, ChevronLeft, ChevronRight, Receipt, Trash2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { CreateCustomerDTO } from '../types';
+import { CreateCustomerDTO, Rates } from '../types';
 import { safeParseFloat } from '../lib/utils';
 import { DEFAULT_COMMISSION_RATES } from '../constants';
+
+const toRateStrings = (r: Rates) => ({ visa: String(r.visa), master: String(r.master), amex: String(r.amex), rupay: String(r.rupay) });
 
 const PHONE_REGEX = /^\d{0,10}$/;
 const validateAddCustomer = (data: CreateCustomerDTO, existingPhones: string[]) => {
@@ -29,13 +32,14 @@ const WALLET_LOW_THRESHOLD = 10000;
 const RECENT_TXN_PAGE_SIZE = 15;
 
 export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ onNavigate }) => {
-  const { accounts, wallets, transactions, customers, addCustomer, formatCurrency, getAccountBalance } = useERP();
+  const { accounts, wallets, transactions, customers, addCustomer, formatCurrency, getAccountBalance, deleteTransaction } = useERP();
+  const { confirm } = useConfirm();
   const [showCashSummary, setShowCashSummary] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
-  const [addUserForm, setAddUserForm] = useState<CreateCustomerDTO>({
+  const [addUserForm, setAddUserForm] = useState<{ name: string; phone: string; commissionRates: Record<keyof Rates, string> }>({
     name: '',
     phone: '',
-    commissionRates: { ...DEFAULT_COMMISSION_RATES }
+    commissionRates: toRateStrings(DEFAULT_COMMISSION_RATES)
   });
   const [addUserErrors, setAddUserErrors] = useState<Record<string, string>>({});
   const [txPage, setTxPage] = useState(1);
@@ -226,12 +230,13 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
                 <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider">Type</th>
                 <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider text-right">Debit</th>
                 <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider text-right">Credit</th>
+                <th className="p-4 w-12"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {paginatedTxns.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-12 text-center text-slate-500 font-medium">
+                  <td colSpan={6} className="p-12 text-center text-slate-500 font-medium">
                     No transactions yet.
                   </td>
                 </tr>
@@ -240,7 +245,7 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
                   const totalDr = txn.entries.reduce((s, e) => s + (e.debit || 0), 0);
                   const totalCr = txn.entries.reduce((s, e) => s + (e.credit || 0), 0);
                   return (
-                    <tr key={txn.id} className={`hover:bg-indigo-50/30 transition-colors duration-150 ${idx % 2 === 1 ? 'bg-slate-50/50' : ''}`}>
+                    <tr key={txn.id} className={`hover:bg-indigo-50/30 transition-colors duration-150 group ${idx % 2 === 1 ? 'bg-slate-50/50' : ''}`}>
                       <td className="p-4 text-sm text-slate-600 font-medium">{new Date(txn.date).toLocaleDateString()}</td>
                       <td className="p-4 text-sm font-semibold text-slate-800">{txn.description}</td>
                       <td className="p-4 text-xs">
@@ -248,6 +253,19 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
                       </td>
                       <td className="p-4 text-sm text-right font-medium text-slate-600">{totalDr > 0 ? formatCurrency(totalDr) : '-'}</td>
                       <td className="p-4 text-sm text-right font-medium text-slate-600">{totalCr > 0 ? formatCurrency(totalCr) : '-'}</td>
+                      <td className="p-4 text-right">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const ok = await confirm({ title: 'Delete Transaction', message: `Permanently delete "${txn.description}"? This will remove it from all ledgers.`, confirmText: 'Delete', variant: 'danger' });
+                            if (ok) deleteTransaction(txn.id);
+                          }}
+                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
+                          title="Delete transaction"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })
@@ -297,13 +315,19 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
-                const payload = { ...addUserForm, name: addUserForm.name.trim(), phone: addUserForm.phone.trim() };
+                const parsedRates: Rates = {
+                  visa: safeParseFloat(addUserForm.commissionRates.visa),
+                  master: safeParseFloat(addUserForm.commissionRates.master),
+                  amex: safeParseFloat(addUserForm.commissionRates.amex),
+                  rupay: safeParseFloat(addUserForm.commissionRates.rupay)
+                };
+                const payload: CreateCustomerDTO = { name: addUserForm.name.trim(), phone: addUserForm.phone.trim(), commissionRates: parsedRates };
                 const err = validateAddCustomer(payload, customers.map(c => c.phone));
                 if (Object.keys(err).length > 0) { setAddUserErrors(err); return; }
                 const id = await addCustomer(payload);
                 if (id) {
                   setShowAddUser(false);
-                  setAddUserForm({ name: '', phone: '', commissionRates: { ...DEFAULT_COMMISSION_RATES } });
+                  setAddUserForm({ name: '', phone: '', commissionRates: toRateStrings(DEFAULT_COMMISSION_RATES) });
                   setAddUserErrors({});
                 }
               }}
@@ -323,10 +347,10 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                 <p className="text-sm font-bold text-slate-700 mb-3">Commission / Service Charges (%)</p>
                 <div className="grid grid-cols-2 gap-4">
-                  <Input label="Visa" type="number" step="0.1" min={0} max={100} value={addUserForm.commissionRates.visa} onChange={e => setAddUserForm({...addUserForm, commissionRates: {...addUserForm.commissionRates, visa: safeParseFloat(e.target.value)}})} error={addUserErrors.rate_visa} />
-                  <Input label="Master" type="number" step="0.1" min={0} max={100} value={addUserForm.commissionRates.master} onChange={e => setAddUserForm({...addUserForm, commissionRates: {...addUserForm.commissionRates, master: safeParseFloat(e.target.value)}})} error={addUserErrors.rate_master} />
-                  <Input label="Amex" type="number" step="0.1" min={0} max={100} value={addUserForm.commissionRates.amex} onChange={e => setAddUserForm({...addUserForm, commissionRates: {...addUserForm.commissionRates, amex: safeParseFloat(e.target.value)}})} error={addUserErrors.rate_amex} />
-                  <Input label="Rupay" type="number" step="0.1" min={0} max={100} value={addUserForm.commissionRates.rupay} onChange={e => setAddUserForm({...addUserForm, commissionRates: {...addUserForm.commissionRates, rupay: safeParseFloat(e.target.value)}})} error={addUserErrors.rate_rupay} />
+                  <Input label="Visa" type="number" step="0.1" min={0} max={100} value={addUserForm.commissionRates.visa} onChange={e => setAddUserForm({...addUserForm, commissionRates: {...addUserForm.commissionRates, visa: e.target.value}})} error={addUserErrors.rate_visa} />
+                  <Input label="Master" type="number" step="0.1" min={0} max={100} value={addUserForm.commissionRates.master} onChange={e => setAddUserForm({...addUserForm, commissionRates: {...addUserForm.commissionRates, master: e.target.value}})} error={addUserErrors.rate_master} />
+                  <Input label="Amex" type="number" step="0.1" min={0} max={100} value={addUserForm.commissionRates.amex} onChange={e => setAddUserForm({...addUserForm, commissionRates: {...addUserForm.commissionRates, amex: e.target.value}})} error={addUserErrors.rate_amex} />
+                  <Input label="Rupay" type="number" step="0.1" min={0} max={100} value={addUserForm.commissionRates.rupay} onChange={e => setAddUserForm({...addUserForm, commissionRates: {...addUserForm.commissionRates, rupay: e.target.value}})} error={addUserErrors.rate_rupay} />
                 </div>
               </div>
               <Button type="submit" className="w-full">Create Customer</Button>

@@ -178,6 +178,10 @@ export const sqliteDb = {
     sqlite.prepare('INSERT INTO transactions (id, date, description, type, entries, status, metadata, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(data.id, data.date, data.description, data.type, data.entries, data.status, data.metadata, data.reference_id);
     return Promise.resolve(data);
   },
+  deleteTransaction: (id: string) => {
+    sqlite.prepare('DELETE FROM transactions WHERE id = ?').run(id);
+    return Promise.resolve({ ok: true });
+  },
 
   getStaffTargets: (storeId: string, month?: string) => {
     const rows = month

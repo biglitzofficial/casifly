@@ -135,6 +135,10 @@ export const api = {
     return fetchApi<unknown>('/erp/transactions', { method: 'POST', body: JSON.stringify(body) });
   },
 
+  async deleteTransaction(id: string) {
+    return fetchApi<{ ok: boolean }>(`/erp/transactions/${id}`, { method: 'DELETE' });
+  },
+
   async getAccountBalance(accountId: string) {
     const data = await fetchApi<{ balance: number }>(`/erp/balance/${accountId}`);
     return data.balance;

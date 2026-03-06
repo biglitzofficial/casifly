@@ -17,6 +17,7 @@ interface ERPContextType {
   
   // Actions
   postTransaction: (description: string, type: TransactionType, entries: LedgerEntry[], metadata?: TransactionMetadata, date?: string) => void;
+  deleteTransaction: (id: string) => void;
   reconcileWallet: (walletId: string, actualBalance: number) => void;
   
   // Masters CRUD
@@ -187,6 +188,20 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       metadata: metadataWithStore
     };
     setTransactions(prev => [newTxn, ...prev]);
+  };
+
+  const deleteTransaction = (id: string) => {
+    if (USE_API) {
+      api.deleteTransaction(id)
+        .then(() => {
+          setTransactions(prev => prev.filter(t => t.id !== id));
+          toast.success('Transaction deleted');
+        })
+        .catch((e: any) => toast.error(e?.message || 'Delete failed'));
+      return;
+    }
+    setTransactions(prev => prev.filter(t => t.id !== id));
+    toast.success('Transaction deleted');
   };
 
   const addCustomer = async (data: CreateCustomerDTO): Promise<string> => {
@@ -435,6 +450,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       wallets,
       transactions: transactionsForUser,
       postTransaction,
+      deleteTransaction,
       getAccountBalance,
       getLedger,
       formatCurrency,

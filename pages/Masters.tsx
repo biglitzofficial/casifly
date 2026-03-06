@@ -358,6 +358,7 @@ const ReconciliationView = () => {
 };
 
 const DEFAULT_RATES = { visa: 2.0, master: 2.0, amex: 3.0, rupay: 1.5 };
+const toRateStrings = (r: Rates) => ({ visa: String(r.visa), master: String(r.master), amex: String(r.amex), rupay: String(r.rupay) });
 
 const PHONE_REGEX = /^\d{0,10}$/;
 const validateCustomerForm = (data: CreateCustomerDTO, isEdit: boolean, editingId: string | null, existingPhones: string[]) => {
@@ -387,14 +388,14 @@ const CustomersView = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [formData, setFormData] = useState<CreateCustomerDTO>({ 
+  const [formData, setFormData] = useState<{ name: string; phone: string; commissionRates: Record<keyof Rates, string> }>({ 
     name: '', 
     phone: '', 
-    commissionRates: { ...DEFAULT_RATES } 
+    commissionRates: toRateStrings(DEFAULT_RATES) 
   });
 
   const resetForm = () => {
-    setFormData({ name: '', phone: '', commissionRates: { ...DEFAULT_RATES } });
+    setFormData({ name: '', phone: '', commissionRates: toRateStrings(DEFAULT_RATES) });
     setErrors({});
     setIsAdding(false);
     setEditingId(null);
@@ -409,7 +410,17 @@ const CustomersView = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = { ...formData, name: formData.name.trim(), phone: formData.phone.trim() };
+    const parsedRates: Rates = {
+      visa: safeParseFloat(formData.commissionRates.visa),
+      master: safeParseFloat(formData.commissionRates.master),
+      amex: safeParseFloat(formData.commissionRates.amex),
+      rupay: safeParseFloat(formData.commissionRates.rupay)
+    };
+    const payload: CreateCustomerDTO = { 
+      name: formData.name.trim(), 
+      phone: formData.phone.trim(),
+      commissionRates: parsedRates
+    };
     const otherPhones = customers.filter(c => c.id !== editingId).map(c => c.phone);
     const validationErrors = validateCustomerForm(payload, !!editingId, editingId, otherPhones);
     if (Object.keys(validationErrors).length > 0) {
@@ -432,7 +443,7 @@ const CustomersView = () => {
     setFormData({
       name: c.name,
       phone: c.phone.replace(/\D/g, '').slice(0, 10),
-      commissionRates: { ...c.commissionRates }
+      commissionRates: toRateStrings(c.commissionRates)
     });
   };
 
@@ -447,10 +458,9 @@ const CustomersView = () => {
   };
 
   const updateRate = (key: keyof typeof formData.commissionRates, value: string) => {
-    const num = safeParseFloat(value);
     setFormData(prev => ({
       ...prev,
-      commissionRates: { ...prev.commissionRates, [key]: num }
+      commissionRates: { ...prev.commissionRates, [key]: value }
     }));
     if (errors[`rate_${key}`]) setErrors(prev => ({ ...prev, [`rate_${key}`]: undefined }));
   };

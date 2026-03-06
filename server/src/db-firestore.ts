@@ -248,6 +248,11 @@ export const firestoreDb = {
     return data;
   },
 
+  async deleteTransaction(id: string) {
+    await fs().collection(C.transactions).doc(id).delete();
+    return { ok: true };
+  },
+
   // Staff Targets
   async getStaffTargets(storeId: string, month?: string) {
     let snap = fs().collection('staff_targets').where('store_id', '==', storeId);
