@@ -73,22 +73,24 @@ export const PaySwipe: React.FC = () => {
     setCurrentCommRate(rate.toString());
   }, [cardType, commissionRates]);
 
-  // Calculations for Suggestions
+  // Sync MDR % from PG when wallet/pg/card changes (user can override manually)
   useEffect(() => {
     if (selectedWallet && selectedPG && cardType) {
       // @ts-ignore
       const mdr = selectedPG.charges[cardType] || 0;
       setAppliedMdrPercent(mdr.toString());
     }
-    
-    // Auto-calculate suggested collection amount based on Advance Amount * Edited Commission Rate
+  }, [swipeWalletId, pgName, cardType, selectedWallet, selectedPG]);
+
+  // Auto-calculate suggested collection amount based on Advance Amount * Commission Rate
+  useEffect(() => {
     if (payAmount) {
-       const amt = safeParseFloat(payAmount);
-       const rate = safeParseFloat(currentCommRate);
-       const suggestedCollection = roundCurrency(amt * (rate / 100));
-       setCollectionAmount(suggestedCollection.toString());
+      const amt = safeParseFloat(payAmount);
+      const rate = safeParseFloat(currentCommRate);
+      const suggestedCollection = roundCurrency(amt * (rate / 100));
+      setCollectionAmount(suggestedCollection.toString());
     }
-  }, [swipeWalletId, pgName, cardType, payAmount, selectedWallet, selectedPG, currentCommRate]);
+  }, [payAmount, currentCommRate]);
 
   const amount = safeParseFloat(payAmount);
   const collAmount = safeParseFloat(collectionAmount);
@@ -161,21 +163,19 @@ export const PaySwipe: React.FC = () => {
         updateCustomer(customerId, { commissionRates: updatedRates });
     }
 
-    // 2. Financial Calculation
+    // 2. Financial Calculation: PG charges MDR, so wallet receives (amount - MDR)
     const mdr = roundCurrency(amount * (mdrPercent / 100));
+    const netToWallet = roundCurrency(amount - mdr);
 
     const entries: LedgerEntry[] = [
-      // 1. Principal Recovery (Wallet UP, Customer Debt DOWN)
-      { accountId: wallet.ledgerAccountId, debit: amount, credit: 0 },
+      // 1. Principal Recovery: Wallet receives NET (after MDR), Customer Debt cleared
+      { accountId: wallet.ledgerAccountId, debit: netToWallet, credit: 0 },
       { accountId: 'A006', debit: 0, credit: amount },
+      { accountId: 'E001', debit: mdr, credit: 0 },
       
       // 2. Charges Collection (Bank UP, Income UP)
       { accountId: collectAccount, debit: collAmount, credit: 0 },
-      { accountId: 'I001', debit: 0, credit: collAmount },
-      
-      // 3. MDR Expense (Expense UP, Wallet DOWN)
-      { accountId: 'E001', debit: mdr, credit: 0 },
-      { accountId: wallet.ledgerAccountId, debit: 0, credit: mdr }
+      { accountId: 'I001', debit: 0, credit: collAmount }
     ];
 
     postTransaction(
@@ -293,8 +293,9 @@ export const PaySwipe: React.FC = () => {
                   <Select label="Collected Into" value={collectAccount} onChange={e => setCollectAccount(e.target.value)} options={accounts.filter(a => ['Bank', 'Cash', 'Wallet'].includes(a.category)).map(a => ({ label: a.name, value: a.id }))} />
                 </div>
                 
-                <div className="text-right text-xs text-slate-500 font-medium">
-                   Est. MDR Cost: {formatCurrency(amount * (safeParseFloat(appliedMdrPercent)/100))}
+                <div className="flex flex-wrap justify-end gap-4 text-xs font-medium">
+                  <span className="text-slate-500">Est. MDR Cost: {formatCurrency(mdrPercent > 0 ? roundCurrency(amount * (mdrPercent / 100)) : 0)}</span>
+                  <span className="text-emerald-600">Net to Wallet: {formatCurrency(Math.max(0, amount - (mdrPercent > 0 ? roundCurrency(amount * (mdrPercent / 100)) : 0)))}</span>
                 </div>
 
                 <Button type="submit" variant="success" className="w-full">Complete Recovery</Button>

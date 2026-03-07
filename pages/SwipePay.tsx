@@ -115,10 +115,10 @@ export const SwipePay: React.FC = () => {
   const netPayableToCustomer = roundCurrency(amountVal - serviceFeeAmount);
   const estimatedProfit = roundCurrency(serviceFeeAmount - portalFeeAmount);
 
-  // Payout Math (Step 2)
+  // Payout Math (Step 2) - Transfer fee is an expense that reduces net outflow
   const payVal = safeParseFloat(payoutAmount);
   const transCommVal = safeParseFloat(transferCommission);
-  const finalPayoutResult = roundCurrency(payVal + transCommVal);
+  const finalPayoutResult = roundCurrency(Math.max(0, payVal - transCommVal));
 
   const handleStep1Submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -167,16 +167,18 @@ export const SwipePay: React.FC = () => {
     if (!payoutAmount?.trim()) err.payoutAmount = 'Settlement amount is required';
     else if (payVal <= 0) err.payoutAmount = 'Settlement amount must be greater than 0';
     if (transferCommission !== '' && (isNaN(transCommVal) || transCommVal < 0)) err.transferCommission = 'Transfer fee must be 0 or more';
+    if (transCommVal > payVal) err.transferCommission = 'Transfer fee cannot exceed settlement amount';
     setStep2Errors(err);
     if (Object.keys(err).length > 0) return;
 
+    // Ledger: Liability reduced by (payVal - fee); fee recorded as expense; total payout = payVal from account
     const entries: LedgerEntry[] = [
       { accountId: 'L001', debit: payVal, credit: 0 },
-      { accountId: payoutAccountId, debit: 0, credit: finalPayoutResult }
+      { accountId: payoutAccountId, debit: 0, credit: payVal }
     ];
-    
     if (transCommVal > 0) {
       entries.push({ accountId: 'E001', debit: transCommVal, credit: 0 });
+      entries.push({ accountId: 'L001', debit: 0, credit: transCommVal }); // Fee reduces net liability settled
     }
 
     postTransaction(
