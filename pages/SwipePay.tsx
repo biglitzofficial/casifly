@@ -31,6 +31,7 @@ export const SwipePay: React.FC = () => {
   const [cardType, setCardType] = useState('visa');
   const [swipeAmount, setSwipeAmount] = useState<string>('');
   const [currentServiceRate, setCurrentServiceRate] = useState<string>('0');
+  const [appliedPortalRate, setAppliedPortalRate] = useState<string>('0'); // Wallet PG charge % - manual override
 
   // --- Step 2: Outflow / Payout Details ---
   const [payoutAccountId, setPayoutAccountId] = useState('A002');
@@ -50,6 +51,13 @@ export const SwipePay: React.FC = () => {
     const rate = commissionRates[cardType as keyof Rates] ?? '0';
     setCurrentServiceRate(String(rate));
   }, [cardType, commissionRates]);
+
+  // Sync Wallet PG Charge % from selected PG when wallet/pg/card changes
+  useEffect(() => {
+    const pg = selectedWallet?.pgs.find(p => p.name === pgName) || selectedWallet?.pgs[0];
+    const mdr = (pg?.charges as any)?.[cardType] ?? 0;
+    setAppliedPortalRate(String(mdr));
+  }, [swipeWalletId, pgName, cardType, selectedWallet]);
 
   const handlePhoneSearch = () => {
     if (phone.length !== 10) return;
@@ -109,7 +117,7 @@ export const SwipePay: React.FC = () => {
   const serviceRateVal = safeParseFloat(currentServiceRate);
   const serviceFeeAmount = roundCurrency((amountVal * serviceRateVal) / 100);
 
-  const portalRateVal = (selectedPG?.charges as any)?.[cardType] || 0;
+  const portalRateVal = safeParseFloat(appliedPortalRate); // Manual entry, synced from PG
   const portalFeeAmount = roundCurrency((amountVal * portalRateVal) / 100);
 
   const netPayableToCustomer = roundCurrency(amountVal - serviceFeeAmount);
@@ -320,6 +328,9 @@ export const SwipePay: React.FC = () => {
                       <div className="grid grid-cols-2 gap-4">
                         <Input label="Swipe Amount (₹)" type="number" className="text-xl font-bold" value={swipeAmount} onChange={e => { setSwipeAmount(e.target.value); setStep1Errors(p => ({...p, swipeAmount: ''})); }} error={step1Errors.swipeAmount} placeholder="0" />
                         <Input label="Applied Rate %" type="number" step="0.1" value={currentServiceRate} onChange={e => { setCurrentServiceRate(e.target.value); setStep1Errors(p => ({...p, currentServiceRate: ''})); }} error={step1Errors.currentServiceRate} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <Input label="Wallet PG Charge %" type="number" step="0.1" value={appliedPortalRate} onChange={e => setAppliedPortalRate(e.target.value)} placeholder="e.g. 0.5" title="Payment gateway MDR % – pre-filled from wallet, editable for overrides" />
                       </div>
                       <Button type="submit" size="lg" className="w-full h-14 text-lg">Process Inflow <ArrowRight size={20}/></Button>
                     </form>
