@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Menu } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
@@ -28,10 +28,17 @@ const VIEW_STORAGE_KEY = 'casifly_view';
 
 const getInitialView = () => {
   try {
+    const hash = window.location.hash.slice(1);
+    if (hash && views.includes(hash)) return hash;
     const saved = localStorage.getItem(VIEW_STORAGE_KEY);
     if (saved && views.includes(saved)) return saved;
   } catch (_) {}
   return 'dashboard';
+};
+
+const getHashUrl = (view: string) => {
+  const base = window.location.pathname + window.location.search;
+  return `${base}${base.endsWith('#') ? '' : '#'}${view}`;
 };
 
 const AppContent: React.FC = () => {
@@ -39,9 +46,31 @@ const AppContent: React.FC = () => {
   const [landingView, setLandingView] = useState<'home' | 'store-login' | 'distributor-login'>('home');
   const [currentView, setViewState] = useState(getInitialView);
   const setView = React.useCallback((view: string) => {
+    if (!views.includes(view)) return;
     setViewState(view);
     try { localStorage.setItem(VIEW_STORAGE_KEY, view); } catch (_) {}
+    try { window.history.pushState(null, '', getHashUrl(view)); } catch (_) {}
   }, []);
+
+  useEffect(() => {
+    const syncFromHash = () => {
+      const hash = window.location.hash.slice(1);
+      const view = (hash && views.includes(hash)) ? hash : 'dashboard';
+      setViewState(view);
+      try { localStorage.setItem(VIEW_STORAGE_KEY, view); } catch (_) {}
+    };
+    window.addEventListener('popstate', syncFromHash);
+    return () => window.removeEventListener('popstate', syncFromHash);
+  }, []);
+
+  // Sync URL on mount so Back has a valid target (Dashboard -> Ledgers -> Back -> Dashboard)
+  useEffect(() => {
+    if (!user || user.role === 'master_admin') return;
+    const cur = window.location.hash.slice(1);
+    if (!cur || !views.includes(cur)) {
+      try { window.history.replaceState(null, '', getHashUrl(currentView)); } catch (_) {}
+    }
+  }, [user?.role]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
