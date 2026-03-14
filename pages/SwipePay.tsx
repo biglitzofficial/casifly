@@ -179,8 +179,6 @@ export const SwipePay: React.FC = () => {
       outflowEntries,
       { customerId: customerId || undefined, walletId: selectedWallet.id }
     );
-</think>path
-h:\casifly\pages\SwipePay.tsx
 
     setStep1Errors({});
     toast.success('Inflow recorded! Record payout from Outflow tab when you transfer.');
