@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useERP } from '../context/ERPContext';
-import { USE_API } from '../lib/api';
 import { useConfirm } from '../context/ConfirmContext';
 import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent, Input, Button } from '../components/ui/Elements';
@@ -126,8 +125,7 @@ export const Profile: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* Development: Delete All Data - Master Admin only when using API; all users when localStorage */}
-        {(!USE_API || isMasterAdmin) && (
+        {/* Development: Delete All Data (for development only) */}
         <Card className="mt-8 border-rose-200">
           <CardHeader
             title="Development"
@@ -161,7 +159,6 @@ export const Profile: React.FC = () => {
             </div>
           </CardContent>
         </Card>
-        )}
       </div>
     </Layout>
   );
