@@ -42,7 +42,7 @@ const getHashUrl = (view: string) => {
 };
 
 const AppContent: React.FC = () => {
-  const { user } = useAuth();
+  const { user, authLoading } = useAuth();
   const [landingView, setLandingView] = useState<'home' | 'store-login' | 'distributor-login'>('home');
   const [currentView, setViewState] = useState(getInitialView);
   const setView = React.useCallback((view: string) => {
@@ -97,6 +97,16 @@ const AppContent: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-slate-600 dark:text-slate-400 font-semibold">Loading...</p>
+        </div>
+      </div>
+    );
+  }
   if (!user) {
     if (landingView === 'store-login') return <StoreLogin onBackToHome={() => setLandingView('home')} />;
     if (landingView === 'distributor-login') return <DistributorLogin onBackToHome={() => setLandingView('home')} />;

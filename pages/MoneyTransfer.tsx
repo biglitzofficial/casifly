@@ -22,6 +22,7 @@ export const MoneyTransfer: React.FC = () => {
   const [inflowAccount, setInflowAccount] = useState('A001');
   const [outflowWallet, setOutflowWallet] = useState(wallets[0]?.id || '');
   const [serviceCharge, setServiceCharge] = useState('');
+  const [submitLoading, setSubmitLoading] = useState(false);
 
   const handlePhoneBlur = () => {
     const digits = phone.replace(/\D/g, '');
@@ -58,41 +59,45 @@ export const MoneyTransfer: React.FC = () => {
     const wallet = wallets.find(w => w.id === outflowWallet);
     if (!wallet) return;
 
-    let finalName = customerName.trim();
-    let finalCustomerId = customerId;
-    if (isNewCustomer) {
+    setSubmitLoading(true);
+    try {
+      let finalName = customerName.trim();
+      let finalCustomerId = customerId;
+      if (isNewCustomer) {
         const newId = await addCustomer({
-            name: finalName,
-            phone: digits,
-            commissionRates: DEFAULT_COMMISSION_RATES
+          name: finalName,
+          phone: digits,
+          commissionRates: DEFAULT_COMMISSION_RATES
         });
         if (!newId) return;
         finalCustomerId = newId;
-    }
-
-    const totalReceived = val + charge;
-    const entries: LedgerEntry[] = [
-      { accountId: inflowAccount, debit: totalReceived, credit: 0 },
-      { accountId: wallet.ledgerAccountId, debit: 0, credit: val },
-      { accountId: 'I001', debit: 0, credit: charge }
-    ];
-    
-    postTransaction(
-      `DMT: ${finalName}`, 
-      TransactionType.MONEY_TRANSFER, 
-      entries,
-      { 
-        customerId: finalCustomerId || undefined,
-        walletId: wallet.id 
       }
-    );
-    toast.success("DMT Recorded Successfully");
-    setAmount('');
-    setServiceCharge('');
-    setPhone('');
-    setCustomerName('');
-    setIsNewCustomer(false);
-    setErrors({});
+
+      const totalReceived = val + charge;
+      const entries: LedgerEntry[] = [
+        { accountId: inflowAccount, debit: totalReceived, credit: 0 },
+        { accountId: wallet.ledgerAccountId, debit: 0, credit: val },
+        { accountId: 'I001', debit: 0, credit: charge }
+      ];
+
+      const p = postTransaction(
+        `DMT: ${finalName}`,
+        TransactionType.MONEY_TRANSFER,
+        entries,
+        { customerId: finalCustomerId || undefined, walletId: wallet.id }
+      );
+      if (p && typeof (p as Promise<unknown>).then === 'function') await p;
+
+      toast.success("DMT Recorded Successfully");
+      setAmount('');
+      setServiceCharge('');
+      setPhone('');
+      setCustomerName('');
+      setIsNewCustomer(false);
+      setErrors({});
+    } finally {
+      setSubmitLoading(false);
+    }
   };
 
   return (
@@ -145,7 +150,7 @@ export const MoneyTransfer: React.FC = () => {
                  <Select label="Send From Wallet" value={outflowWallet} onChange={e => setOutflowWallet(e.target.value)} options={wallets.map(w => ({ label: `${w.name} (Bal: ${formatCurrency(getAccountBalance(w.ledgerAccountId))})`, value: w.id }))} />
               </div>
 
-              <Button type="submit" className="w-full">Execute Transfer</Button>
+              <Button type="submit" className="w-full" loading={submitLoading} disabled={submitLoading}>Execute Transfer</Button>
             </form>
           </CardContent>
        </Card>

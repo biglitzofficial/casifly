@@ -1,5 +1,6 @@
 import React, { InputHTMLAttributes, SelectHTMLAttributes } from 'react';
 import { cn, filterDecimalInput } from '../../lib/utils';
+import { Spinner } from './Loading';
 
 // --- Card Components ---
 export const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className }) => (
@@ -158,9 +159,10 @@ export const FilterBtn: React.FC<{
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger' | 'success' | 'outline';
   size?: 'sm' | 'md' | 'lg';
+  loading?: boolean;
 }
 
-export const Button: React.FC<ButtonProps> = ({ children, variant = 'primary', size = 'md', className, ...props }) => {
+export const Button: React.FC<ButtonProps> = ({ children, variant = 'primary', size = 'md', loading, className, disabled, ...props }) => {
   const variants = {
     primary: "bg-gradient-to-r from-indigo-500 via-indigo-600 to-violet-600 text-white shadow-xl shadow-indigo-500/30 hover:shadow-2xl hover:shadow-indigo-500/40 hover:scale-[1.02] active:scale-[0.98]",
     secondary: "bg-slate-800 text-white shadow-xl shadow-slate-900/30 hover:bg-slate-900 hover:scale-[1.02] active:scale-[0.98]",
@@ -183,8 +185,10 @@ export const Button: React.FC<ButtonProps> = ({ children, variant = 'primary', s
         sizes[size],
         className
       )}
+      disabled={disabled || loading}
       {...props}
     >
+      {loading && <Spinner size={18} className="shrink-0 text-current" />}
       {children}
     </button>
   );

@@ -16,7 +16,7 @@ interface ERPContextType {
   transactions: Transaction[];
   
   // Actions
-  postTransaction: (description: string, type: TransactionType, entries: LedgerEntry[], metadata?: TransactionMetadata, date?: string) => void;
+  postTransaction: (description: string, type: TransactionType, entries: LedgerEntry[], metadata?: TransactionMetadata, date?: string) => void | Promise<void>;
   deleteTransaction: (id: string) => void;
   reconcileWallet: (walletId: string, actualBalance: number) => void;
   
@@ -173,12 +173,11 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     if (USE_API) {
-      api.postTransaction({ description, type, entries, metadata: metadataWithStore, date: dateStr })
+      return api.postTransaction({ description, type, entries, metadata: metadataWithStore, date: dateStr })
         .then((t: any) => {
           setTransactions(prev => [{ id: t.id, date: t.date, description: t.description, type: t.type, entries: t.entries, status: 'COMPLETED', metadata: t.metadata }, ...prev]);
         })
-        .catch(err => toast.error(err?.message || 'Transaction failed'));
-      return;
+        .catch(err => { toast.error(err?.message || 'Transaction failed'); throw err; });
     }
 
     const newTxn: Transaction = {
@@ -191,6 +190,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       metadata: metadataWithStore
     };
     setTransactions(prev => [newTxn, ...prev]);
+    return Promise.resolve();
   };
 
   const deleteTransaction = (id: string) => {

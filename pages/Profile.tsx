@@ -10,6 +10,7 @@ export const Profile: React.FC = () => {
   const { user, getCurrentProductUser, updateCurrentUserProfile, products } = useAuth();
   const { clearAllData } = useERP();
   const { confirm } = useConfirm();
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -143,6 +144,7 @@ export const Profile: React.FC = () => {
               <Button
                 variant="outline"
                 className="border-rose-300 text-rose-700 hover:bg-rose-100"
+                loading={deleteLoading}
                 onClick={async () => {
                   const ok = await confirm({
                     title: 'Delete All Data?',
@@ -150,7 +152,10 @@ export const Profile: React.FC = () => {
                     confirmText: 'Delete All',
                     variant: 'danger',
                   });
-                  if (ok) await clearAllData();
+                  if (ok) {
+                    setDeleteLoading(true);
+                    try { await clearAllData(); } finally { setDeleteLoading(false); }
+                  }
                 }}
               >
                 <Trash2 size={18} />

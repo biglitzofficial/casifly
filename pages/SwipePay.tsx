@@ -38,6 +38,9 @@ export const SwipePay: React.FC = () => {
   const [payoutAmount, setPayoutAmount] = useState<string>('');
   const [transferCommission, setTransferCommission] = useState<string>('0'); // e.g. IMPS charge
   const [transactionNote, setTransactionNote] = useState('');
+  const [inflowLoading, setInflowLoading] = useState(false);
+  const [outflowLoading, setOutflowLoading] = useState(false);
+  const [createCustLoading, setCreateCustLoading] = useState(false);
 
   // --- Logic ---
   const selectedWallet = wallets.find(w => w.id === swipeWalletId);
@@ -94,21 +97,26 @@ export const SwipePay: React.FC = () => {
     setStep1Errors(err);
     if (Object.keys(err).length > 0) return;
 
-    const parsedRates: Rates = {
-      visa: safeParseFloat(commissionRates.visa),
-      master: safeParseFloat(commissionRates.master),
-      amex: safeParseFloat(commissionRates.amex),
-      rupay: safeParseFloat(commissionRates.rupay)
-    };
-    const newId = await addCustomer({
-      name: customerName,
-      phone,
-      commissionRates: parsedRates
-    });
-    if (!newId) return;
-    setCustomerId(newId);
-    setCommissionRates(toRateStrings(parsedRates));
-    setIsNewCustomer(false); // Switch to "swipe" mode for this existing customer
+    setCreateCustLoading(true);
+    try {
+      const parsedRates: Rates = {
+        visa: safeParseFloat(commissionRates.visa),
+        master: safeParseFloat(commissionRates.master),
+        amex: safeParseFloat(commissionRates.amex),
+        rupay: safeParseFloat(commissionRates.rupay)
+      };
+      const newId = await addCustomer({
+        name: customerName,
+        phone,
+        commissionRates: parsedRates
+      });
+      if (!newId) return;
+      setCustomerId(newId);
+      setCommissionRates(toRateStrings(parsedRates));
+      setIsNewCustomer(false); // Switch to "swipe" mode for this existing customer
+    } finally {
+      setCreateCustLoading(false);
+    }
   };
 
   // Calculations
@@ -128,7 +136,7 @@ export const SwipePay: React.FC = () => {
   const transCommVal = safeParseFloat(transferCommission);
   const finalPayoutResult = roundCurrency(Math.max(0, payVal - transCommVal));
 
-  const handleStep1Submit = (e: React.FormEvent) => {
+  const handleStep1Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const err: Record<string, string> = {};
     if (!swipeAmount?.trim()) err.swipeAmount = 'Swipe amount is required';
@@ -138,6 +146,8 @@ export const SwipePay: React.FC = () => {
     setStep1Errors(err);
     if (Object.keys(err).length > 0 || !selectedWallet || !customerId) return;
 
+    setInflowLoading(true);
+    try {
     // Update customer rates if the specific one was edited during this transaction
     const parsedRates: Rates = {
       visa: safeParseFloat(commissionRates.visa),
@@ -157,21 +167,23 @@ export const SwipePay: React.FC = () => {
       { accountId: 'L001', debit: serviceFeeAmount, credit: 0 },
       { accountId: 'I001', debit: 0, credit: serviceFeeAmount }
     ];
-    postTransaction(
-      `Swipe Inflow: ${customerName} (${cardType.toUpperCase()})`,
-      TransactionType.SWIPE_PAY,
-      inflowEntries,
-      { customerId: customerId || undefined, walletId: selectedWallet.id, cardType: cardType }
-    );
+      const p = postTransaction(
+        `Swipe Inflow: ${customerName} (${cardType.toUpperCase()})`,
+        TransactionType.SWIPE_PAY,
+        inflowEntries,
+        { customerId: customerId || undefined, walletId: selectedWallet.id, cardType: cardType }
+      );
+      if (p && typeof (p as Promise<unknown>).then === 'function') await p;
 
     // Outflow is recorded separately from Outflow tab when you actually transfer to customer.
     // Wallet balance shows inflow only until outflow is recorded; then balance = inflow − outflow.
     setStep1Errors({});
     toast.success('Inflow recorded! Record payout from Outflow tab when you transfer.');
     setSwipeAmount('');
+    } finally { setInflowLoading(false); }
   };
 
-  const handleStep2Submit = (e: React.FormEvent) => {
+  const handleStep2Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const err: Record<string, string> = {};
     if (!payoutAmount?.trim()) err.payoutAmount = 'Settlement amount is required';
@@ -187,6 +199,8 @@ export const SwipePay: React.FC = () => {
       toast.error('Please select a wallet to pay from.');
       return;
     }
+    setOutflowLoading(true);
+    try {
     const totalFromWallet = roundCurrency(payVal + transCommVal);
     const entries: LedgerEntry[] = [
       { accountId: 'L001', debit: payVal, credit: 0 },
@@ -196,18 +210,20 @@ export const SwipePay: React.FC = () => {
       entries.push({ accountId: 'E001', debit: transCommVal, credit: 0 });
     }
 
-    postTransaction(
-      `Payout Outflow: ${customerName}`,
-      TransactionType.SWIPE_PAY,
-      entries,
-      { customerId: customerId || undefined, walletId: outflowWallet.id }
-    );
+      const p = postTransaction(
+        `Payout Outflow: ${customerName}`,
+        TransactionType.SWIPE_PAY,
+        entries,
+        { customerId: customerId || undefined, walletId: outflowWallet.id }
+      );
+      if (p && typeof (p as Promise<unknown>).then === 'function') await p;
 
     toast.success('Outflow recorded successfully!');
     resetCustomer();
     setPayoutAmount('');
     setTransferCommission('0');
     setStep2Errors({});
+    } finally { setOutflowLoading(false); }
   };
 
   const updateNewCustRate = (type: keyof Rates, val: string) => {
@@ -314,7 +330,7 @@ export const SwipePay: React.FC = () => {
                           </div>
                         </div>
 
-                        <Button type="submit" className="w-full bg-amber-600 hover:bg-amber-700">
+                        <Button type="submit" className="w-full bg-amber-600 hover:bg-amber-700" loading={createCustLoading}>
                           <Save size={18}/> Save & Continue Transaction
                         </Button>
                       </form>
@@ -335,7 +351,7 @@ export const SwipePay: React.FC = () => {
                       <div className="grid grid-cols-2 gap-4">
                         <Input label="Wallet PG Charge %" type="number" step="0.1" value={appliedPortalRate} onChange={e => setAppliedPortalRate(e.target.value)} placeholder="e.g. 0.5" title="Payment gateway MDR % – pre-filled from wallet, editable for overrides" />
                       </div>
-                      <Button type="submit" size="lg" className="w-full h-14 text-lg">Process Inflow <ArrowRight size={20}/></Button>
+                      <Button type="submit" size="lg" className="w-full h-14 text-lg" loading={inflowLoading}>Process Inflow <ArrowRight size={20}/></Button>
                     </form>
                   )}
                 </div>
@@ -391,7 +407,7 @@ export const SwipePay: React.FC = () => {
                         options={wallets.map(w => ({ label: `${w.name} (${formatCurrency(getAccountBalance(w.ledgerAccountId))})`, value: w.id }))} 
                       />
                       <Input label="Internal Note" placeholder="IMPS Ref / Transfer Reason" value={transactionNote} onChange={e => setTransactionNote(e.target.value)} />
-                      <Button type="submit" variant="success" size="lg" className="w-full">Record Outflow</Button>
+                      <Button type="submit" variant="success" size="lg" className="w-full" loading={outflowLoading}>Record Outflow</Button>
                     </form>
                   )}
                 </div>

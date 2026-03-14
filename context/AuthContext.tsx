@@ -46,6 +46,7 @@ const saveAdminData = (data: AdminData) => {
 
 interface AuthContextType {
   user: AuthUser | null;
+  authLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   isMasterAdmin: boolean;
@@ -82,6 +83,7 @@ const slugify = (s: string) => s.toLowerCase().replace(/\s+/g, '-').replace(/[^a
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [adminData, setAdminData] = useState<AdminData>(loadAdminData);
   const [productsLoaded, setProductsLoaded] = useState(false);
 
@@ -89,7 +91,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (USE_API && api.getToken()) {
       api.getMe()
         .then((u) => setUser({ id: u.id, email: u.email, name: u.name, role: u.role as AuthUser['role'], productId: u.productId }))
-        .catch(() => { api.logout(); setUser(null); });
+        .catch(() => { api.logout(); setUser(null); })
+        .finally(() => setAuthLoading(false));
       return;
     }
     const raw = localStorage.getItem(SESSION_KEY);
@@ -99,6 +102,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (u?.id && u?.email) setUser(u);
       } catch (_) {}
     }
+    setAuthLoading(false);
   }, []);
 
   useEffect(() => {
@@ -441,6 +445,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const value: AuthContextType = {
     user,
+    authLoading,
     login,
     logout,
     isMasterAdmin: user?.role === 'master_admin',
