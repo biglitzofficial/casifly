@@ -34,7 +34,7 @@ export const SwipePay: React.FC = () => {
   const [appliedPortalRate, setAppliedPortalRate] = useState<string>('0'); // Wallet PG charge % - manual override
 
   // --- Step 2: Outflow / Payout Details ---
-  const [payoutAccountId, setPayoutAccountId] = useState('A002');
+  const [outflowWalletId, setOutflowWalletId] = useState(wallets[0]?.id || ''); // Pay FROM this wallet (money leaves wallet)
   const [payoutAmount, setPayoutAmount] = useState<string>('');
   const [transferCommission, setTransferCommission] = useState<string>('0'); // e.g. IMPS charge
   const [transactionNote, setTransactionNote] = useState('');
@@ -164,27 +164,27 @@ export const SwipePay: React.FC = () => {
       { customerId: customerId || undefined, walletId: selectedWallet.id, cardType: cardType }
     );
 
-    // 2. Outflow transaction (payout) - complete the cycle
+    // 2. Outflow transaction (payout) - complete the cycle (pay FROM wallet)
+    // Wallet balance: inflow(9880) - outflow(9790+fee) = margin; revenue = same
     const transFee = safeParseFloat(transferCommission) || 0;
     const finalPayout = roundCurrency(netPayableToCustomer + transFee);
     const outflowEntries: LedgerEntry[] = [
       { accountId: 'L001', debit: netPayableToCustomer, credit: 0 },
-      { accountId: payoutAccountId, debit: 0, credit: finalPayout }
+      { accountId: 'E001', debit: transFee, credit: 0 },
+      { accountId: selectedWallet.ledgerAccountId, debit: 0, credit: finalPayout }
     ];
-    if (transFee > 0) {
-      outflowEntries.push({ accountId: 'E001', debit: transFee, credit: 0 });
-    }
     postTransaction(
       `Payout Outflow: ${customerName}`,
       TransactionType.SWIPE_PAY,
       outflowEntries,
-      { customerId: customerId || undefined }
+      { customerId: customerId || undefined, walletId: selectedWallet.id }
     );
+</think>path
+h:\casifly\pages\SwipePay.tsx
 
     setStep1Errors({});
-    toast.success('Inflow & Outflow recorded! Transaction cycle complete.');
+    toast.success('Inflow recorded! Record payout from Outflow tab when you transfer.');
     setSwipeAmount('');
-    setTransferCommission('0');
   };
 
   const handleStep2Submit = (e: React.FormEvent) => {
@@ -197,21 +197,26 @@ export const SwipePay: React.FC = () => {
     setStep2Errors(err);
     if (Object.keys(err).length > 0) return;
 
-    // Ledger: Liability reduced by (payVal - fee); fee recorded as expense; total payout = payVal from account
+    // Ledger: Pay FROM wallet (money leaves wallet). L001 reduced by payVal; transfer fee is our expense.
+    const outflowWallet = wallets.find(w => w.id === outflowWalletId);
+    if (!outflowWallet) {
+      toast.error('Please select a wallet to pay from.');
+      return;
+    }
+    const totalFromWallet = roundCurrency(payVal + transCommVal);
     const entries: LedgerEntry[] = [
       { accountId: 'L001', debit: payVal, credit: 0 },
-      { accountId: payoutAccountId, debit: 0, credit: payVal }
+      { accountId: outflowWallet.ledgerAccountId, debit: 0, credit: totalFromWallet }
     ];
     if (transCommVal > 0) {
       entries.push({ accountId: 'E001', debit: transCommVal, credit: 0 });
-      entries.push({ accountId: 'L001', debit: 0, credit: transCommVal }); // Fee reduces net liability settled
     }
 
     postTransaction(
       `Payout Outflow: ${customerName}`,
       TransactionType.SWIPE_PAY,
       entries,
-      { customerId: customerId || undefined }
+      { customerId: customerId || undefined, walletId: outflowWallet.id }
     );
 
     toast.success('Outflow recorded successfully!');
@@ -396,10 +401,10 @@ export const SwipePay: React.FC = () => {
                         <Input label="Wallet Transfer Fee (₹)" type="number" value={transferCommission} onChange={e => { setTransferCommission(e.target.value); setStep2Errors(p => ({...p, transferCommission: ''})); }} error={step2Errors.transferCommission} placeholder="0" />
                       </div>
                       <Select 
-                        label="Payout To Account" 
-                        value={payoutAccountId} 
-                        onChange={e => setPayoutAccountId(e.target.value)} 
-                        options={accounts.filter(a => ['Bank','Cash','Wallet'].includes(a.category)).map(a => ({ label: `${a.name} (${formatCurrency(getAccountBalance(a.id))})`, value: a.id }))} 
+                        label="Pay From Wallet" 
+                        value={outflowWalletId} 
+                        onChange={e => setOutflowWalletId(e.target.value)} 
+                        options={wallets.map(w => ({ label: `${w.name} (${formatCurrency(getAccountBalance(w.ledgerAccountId))})`, value: w.id }))} 
                       />
                       <Input label="Internal Note" placeholder="IMPS Ref / Transfer Reason" value={transactionNote} onChange={e => setTransactionNote(e.target.value)} />
                       <Button type="submit" variant="success" size="lg" className="w-full">Record Outflow</Button>
