@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useERP } from '../context/ERPContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent, Input, Button } from '../components/ui/Elements';
-import { Save } from 'lucide-react';
+import { Save, Trash2, AlertTriangle } from 'lucide-react';
 
 export const Profile: React.FC = () => {
   const { user, getCurrentProductUser, updateCurrentUserProfile, products } = useAuth();
+  const { clearAllData } = useERP();
+  const { confirm } = useConfirm();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -118,6 +122,41 @@ export const Profile: React.FC = () => {
                 </Button>
               </form>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Development: Delete All Data */}
+        <Card className="mt-8 border-rose-200">
+          <CardHeader
+            title="Development"
+            subtitle="Reset all ERP data to initial state (for development only)"
+          />
+          <CardContent>
+            <div className="p-6 bg-rose-50/50 rounded-2xl border border-rose-200 space-y-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-rose-800">Delete All Data</p>
+                  <p className="text-xs text-rose-700 mt-1">This will permanently delete all transactions, customers, and reset accounts/wallets to initial state. Use only for development.</p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                className="border-rose-300 text-rose-700 hover:bg-rose-100"
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: 'Delete All Data?',
+                    message: 'This will permanently clear all ERP data and reset to initial state. This cannot be undone.',
+                    confirmText: 'Delete All',
+                    variant: 'danger',
+                  });
+                  if (ok) await clearAllData();
+                }}
+              >
+                <Trash2 size={18} />
+                Delete All Data
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>

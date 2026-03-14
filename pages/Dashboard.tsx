@@ -32,7 +32,8 @@ const WALLET_LOW_THRESHOLD = 10000;
 const RECENT_TXN_PAGE_SIZE = 15;
 
 export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ onNavigate }) => {
-  const { accounts, wallets, transactions, customers, addCustomer, formatCurrency, getAccountBalance, deleteTransaction } = useERP();
+  const { accounts, wallets, transactions, customers, addCustomer, formatCurrency, getAccountBalance, deleteTransaction, generateProfitAndLoss } = useERP();
+  const plReport = generateProfitAndLoss();
   const { confirm } = useConfirm();
   const [showCashSummary, setShowCashSummary] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
@@ -50,7 +51,6 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
   const totalCash = cashAccounts.reduce((sum, a) => sum + getAccountBalance(a.id), 0);
   const totalBank = bankAccounts.reduce((sum, a) => sum + getAccountBalance(a.id), 0);
   const totalWallet = wallets.reduce((sum, w) => sum + getAccountBalance(w.ledgerAccountId), 0);
-  const totalIncome = getAccountBalance('I001') + getAccountBalance('I002');
 
   const walletData = wallets.map(w => ({
     name: w.name,
@@ -116,8 +116,8 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
           color="violet"
         />
         <MetricCard 
-          title="Revenue (YTD)" 
-          amount={formatCurrency(totalIncome)} 
+          title="Net Profit (YTD)" 
+          amount={formatCurrency(plReport.netProfit)} 
           icon={<Sparkles className="w-6 h-6 text-amber-600" />} 
           trend="+12%" 
           color="amber"

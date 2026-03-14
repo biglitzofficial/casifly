@@ -43,6 +43,9 @@ interface ERPContextType {
   // Backup/Restore
   exportBackup: () => string;
   restoreBackup: (json: string) => { success: boolean; error?: string };
+
+  // Development
+  clearAllData: () => Promise<void>;
 }
 
 const ERPContext = createContext<ERPContextType | undefined>(undefined);
@@ -419,6 +422,25 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return { assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity };
   };
 
+  const clearAllData = async () => {
+    if (USE_API) {
+      try {
+        await api.resetAllData();
+        await refreshFromApi();
+        toast.success('All data cleared and reset to initial state.');
+      } catch (e: any) {
+        toast.error(e?.message || 'Failed to clear data');
+      }
+      return;
+    }
+    localStorage.removeItem(ERP_STORAGE_KEY);
+    setAccounts(INITIAL_ACCOUNTS);
+    setCustomers(INITIAL_CUSTOMERS);
+    setWallets(INITIAL_WALLETS);
+    setTransactions([]);
+    toast.success('All data cleared. Resetting to initial state.');
+  };
+
   const exportBackup = () => {
     const erp = { accounts, customers, wallets: allWallets, transactions };
     const admin = localStorage.getItem('casifly_admin_data') || '{}';
@@ -467,7 +489,8 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       generateBalanceSheet,
       generateProfitAndLoss,
       exportBackup,
-      restoreBackup
+      restoreBackup,
+      clearAllData
     }}>
       {children}
     </ERPContext.Provider>

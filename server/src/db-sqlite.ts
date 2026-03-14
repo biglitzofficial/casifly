@@ -195,5 +195,52 @@ export const sqliteDb = {
     return Promise.resolve({ storeId, staffId, month, target });
   },
 
+  async resetErpData() {
+    const DEFAULT_STORE_ID = 'P0001';
+    const INITIAL_ACCOUNTS = [
+      { id: 'A001', name: 'Cash on Hand', type: 'ASSET', category: 'Cash', balance: 500000, store_id: null },
+      { id: 'A002', name: 'HDFC Bank Main', type: 'ASSET', category: 'Bank', balance: 1200000, store_id: DEFAULT_STORE_ID },
+      { id: 'A003', name: 'ICICI Bank Ops', type: 'ASSET', category: 'Bank', balance: 800000, store_id: DEFAULT_STORE_ID },
+      { id: 'A004', name: 'Wallet A (Razorpay)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
+      { id: 'A005', name: 'Wallet B (Paytm)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
+      { id: 'A006', name: 'Customer Receivables', type: 'ASSET', category: 'Customer', balance: 0, store_id: null },
+      { id: 'L001', name: 'Customer Payables', type: 'LIABILITY', category: 'Customer', balance: 0, store_id: null },
+      { id: 'L002', name: 'Duties & Taxes', type: 'LIABILITY', category: 'Revenue', balance: 0, store_id: null },
+      { id: 'Q001', name: "Owner's Equity", type: 'LIABILITY', category: 'Equity', balance: 1000000, store_id: null },
+      { id: 'Q002', name: 'Retained Earnings', type: 'LIABILITY', category: 'Equity', balance: 1500000, store_id: null },
+      { id: 'I001', name: 'Service Charges', type: 'INCOME', category: 'Revenue', balance: 0, store_id: null },
+      { id: 'I002', name: 'Wallet Surplus', type: 'INCOME', category: 'Revenue', balance: 0, store_id: null },
+      { id: 'E001', name: 'Wallet MDR Charges', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
+      { id: 'E002', name: 'Wallet Deficit', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
+      { id: 'E003', name: 'Office Rent', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
+    ];
+    const INITIAL_CUSTOMERS = [
+      { id: 'C001', name: 'Rahul Sharma', phone: '9876543210', commission_rates: JSON.stringify({ visa: 2.0, master: 2.0, amex: 3.0, rupay: 1.5 }), ledger_account_id: 'L001', store_id: null, joined_at: null },
+      { id: 'C002', name: 'Priya Verma', phone: '9988776655', commission_rates: JSON.stringify({ visa: 1.8, master: 1.8, amex: 2.8, rupay: 1.2 }), ledger_account_id: 'L001', store_id: null, joined_at: null },
+      { id: 'C003', name: 'Enterprises Ltd', phone: '8877665544', commission_rates: JSON.stringify({ visa: 1.5, master: 1.5, amex: 2.5, rupay: 1.0 }), ledger_account_id: 'L001', store_id: null, joined_at: null },
+    ];
+    const INITIAL_WALLETS = [
+      { id: 'W001', name: 'Wallet A (Razorpay)', ledger_account_id: 'A004', pgs: JSON.stringify([{ name: 'Standard', charges: { visa: 1.2, master: 1.2, amex: 2.5, rupay: 0.5 } }, { name: 'Premium', charges: { visa: 1.5, master: 1.5, amex: 2.8, rupay: 0.8 } }]), store_id: null },
+      { id: 'W002', name: 'Wallet B (Paytm)', ledger_account_id: 'A005', pgs: JSON.stringify([{ name: 'Business', charges: { visa: 1.1, master: 1.1, amex: 2.4, rupay: 0.0 } }]), store_id: null },
+    ];
+    sqlite.exec('DELETE FROM transactions');
+    sqlite.exec('DELETE FROM customers');
+    sqlite.exec('DELETE FROM wallets');
+    sqlite.exec('DELETE FROM accounts');
+    const insAccount = sqlite.prepare('INSERT INTO accounts (id, name, type, category, balance, store_id) VALUES (?, ?, ?, ?, ?, ?)');
+    for (const a of INITIAL_ACCOUNTS) {
+      insAccount.run(a.id, a.name, a.type, a.category, a.balance, (a as any).store_id ?? null);
+    }
+    const insCustomer = sqlite.prepare('INSERT INTO customers (id, name, phone, commission_rates, ledger_account_id, store_id, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    for (const c of INITIAL_CUSTOMERS) {
+      insCustomer.run(c.id, c.name, c.phone, c.commission_rates, c.ledger_account_id, c.store_id, c.joined_at);
+    }
+    const insWallet = sqlite.prepare('INSERT INTO wallets (id, name, ledger_account_id, pgs, store_id) VALUES (?, ?, ?, ?, ?)');
+    for (const w of INITIAL_WALLETS) {
+      insWallet.run(w.id, w.name, w.ledger_account_id, w.pgs, w.store_id);
+    }
+    return Promise.resolve({ ok: true });
+  },
+
   close: () => sqlite.close(),
 };

@@ -139,6 +139,10 @@ export const api = {
     return fetchApi<{ ok: boolean }>(`/erp/transactions/${id}`, { method: 'DELETE' });
   },
 
+  async resetAllData() {
+    return fetchApi<{ ok: boolean }>('/erp/reset', { method: 'POST' });
+  },
+
   async getAccountBalance(accountId: string) {
     const data = await fetchApi<{ balance: number }>(`/erp/balance/${accountId}`);
     return data.balance;

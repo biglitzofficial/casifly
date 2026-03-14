@@ -164,22 +164,8 @@ export const SwipePay: React.FC = () => {
       { customerId: customerId || undefined, walletId: selectedWallet.id, cardType: cardType }
     );
 
-    // 2. Outflow transaction (payout) - complete the cycle (pay FROM wallet)
-    // Wallet balance: inflow(9880) - outflow(9790+fee) = margin; revenue = same
-    const transFee = safeParseFloat(transferCommission) || 0;
-    const finalPayout = roundCurrency(netPayableToCustomer + transFee);
-    const outflowEntries: LedgerEntry[] = [
-      { accountId: 'L001', debit: netPayableToCustomer, credit: 0 },
-      { accountId: 'E001', debit: transFee, credit: 0 },
-      { accountId: selectedWallet.ledgerAccountId, debit: 0, credit: finalPayout }
-    ];
-    postTransaction(
-      `Payout Outflow: ${customerName}`,
-      TransactionType.SWIPE_PAY,
-      outflowEntries,
-      { customerId: customerId || undefined, walletId: selectedWallet.id }
-    );
-
+    // Outflow is recorded separately from Outflow tab when you actually transfer to customer.
+    // Wallet balance shows inflow only until outflow is recorded; then balance = inflow − outflow.
     setStep1Errors({});
     toast.success('Inflow recorded! Record payout from Outflow tab when you transfer.');
     setSwipeAmount('');

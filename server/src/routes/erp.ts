@@ -266,6 +266,17 @@ erpRouter.delete('/transactions/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+// Reset all ERP data (development only - Master Admin)
+erpRouter.post('/reset', async (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== 'master_admin') {
+    res.status(403).json({ error: 'Master Admin only. For development reset.' });
+    return;
+  }
+  await db.resetErpData();
+  res.json({ ok: true });
+});
+
 // Staff targets (store admin only)
 erpRouter.get('/staff-targets', async (req, res) => {
   const user = (req as any).user;
