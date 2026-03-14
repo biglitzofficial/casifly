@@ -296,11 +296,16 @@ export const firestoreDb = {
       { id: 'W001', name: 'Wallet A (Razorpay)', ledger_account_id: 'A004', pgs: JSON.stringify([{ name: 'Standard', charges: { visa: 1.2, master: 1.2, amex: 2.5, rupay: 0.5 } }, { name: 'Premium', charges: { visa: 1.5, master: 1.5, amex: 2.8, rupay: 0.8 } }]), store_id: null },
       { id: 'W002', name: 'Wallet B (Paytm)', ledger_account_id: 'A005', pgs: JSON.stringify([{ name: 'Business', charges: { visa: 1.1, master: 1.1, amex: 2.4, rupay: 0.0 } }]), store_id: null },
     ];
+    const BATCH_LIMIT = 500;
     const batchDelete = async (coll: string) => {
       const snap = await f.collection(coll).get();
-      const batch = f.batch();
-      snap.docs.forEach((d) => batch.delete(d.ref));
-      if (snap.size > 0) await batch.commit();
+      for (let i = 0; i < snap.docs.length; i += BATCH_LIMIT) {
+        const chunk = snap.docs.slice(i, i + BATCH_LIMIT);
+        if (chunk.length === 0) continue;
+        const batch = f.batch();
+        chunk.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      }
     };
     await batchDelete(C.transactions);
     await batchDelete(C.customers);

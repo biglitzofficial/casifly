@@ -273,8 +273,13 @@ erpRouter.post('/reset', async (req, res) => {
     res.status(403).json({ error: 'Master Admin only. For development reset.' });
     return;
   }
-  await db.resetErpData();
-  res.json({ ok: true });
+  try {
+    await db.resetErpData();
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error('resetErpData failed:', e);
+    res.status(500).json({ error: e?.message || 'Reset failed' });
+  }
 });
 
 // Staff targets (store admin only)
