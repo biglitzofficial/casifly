@@ -6,14 +6,14 @@ import { LedgerEntry, TransactionType, Rates } from '../types';
 import { Card, CardContent, CardHeader, Input, Select, Button } from '../components/ui/Elements';
 import { safeParseFloat, roundCurrency } from '../lib/utils';
 import { DEFAULT_COMMISSION_RATES } from '../constants';
-import { ArrowRight, Lock, Unlock, CheckCircle2, Info, UserPlus, Save, X } from 'lucide-react';
+import { ArrowRight, ArrowDownToLine, ArrowUpFromLine, Lock, Unlock, CheckCircle2, Info, UserPlus, Save, X } from 'lucide-react';
 
 export const SwipePay: React.FC = () => {
   const { customers, wallets, accounts, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer } = useERP();
   const toast = useToast();
 
-  // --- Workflow State ---
-  const [step, setStep] = useState<1 | 2>(1);
+  // --- Mode: Inflow or Outflow (separate entries) ---
+  const [mode, setMode] = useState<'inflow' | 'outflow'>('inflow');
 
   // --- Step 1: Customer & Inflow Details ---
   const [phone, setPhone] = useState('');
@@ -148,7 +148,8 @@ export const SwipePay: React.FC = () => {
     const updatedRates = { ...parsedRates, [cardType]: serviceRateVal };
     updateCustomer(customerId, { commissionRates: updatedRates });
 
-    const entries: LedgerEntry[] = [
+    // 1. Inflow transaction
+    const inflowEntries: LedgerEntry[] = [
       { accountId: selectedWallet.ledgerAccountId, debit: amountVal, credit: 0 },
       { accountId: 'L001', debit: 0, credit: amountVal },
       { accountId: 'E001', debit: portalFeeAmount, credit: 0 },
@@ -156,17 +157,34 @@ export const SwipePay: React.FC = () => {
       { accountId: 'L001', debit: serviceFeeAmount, credit: 0 },
       { accountId: 'I001', debit: 0, credit: serviceFeeAmount }
     ];
-
-    setStep1Errors({});
     postTransaction(
       `Swipe Inflow: ${customerName} (${cardType.toUpperCase()})`,
       TransactionType.SWIPE_PAY,
-      entries,
+      inflowEntries,
       { customerId: customerId || undefined, walletId: selectedWallet.id, cardType: cardType }
     );
 
-    setPayoutAmount(netPayableToCustomer.toString());
-    setStep(2);
+    // 2. Outflow transaction (payout) - complete the cycle
+    const transFee = safeParseFloat(transferCommission) || 0;
+    const finalPayout = roundCurrency(netPayableToCustomer + transFee);
+    const outflowEntries: LedgerEntry[] = [
+      { accountId: 'L001', debit: netPayableToCustomer, credit: 0 },
+      { accountId: payoutAccountId, debit: 0, credit: finalPayout }
+    ];
+    if (transFee > 0) {
+      outflowEntries.push({ accountId: 'E001', debit: transFee, credit: 0 });
+    }
+    postTransaction(
+      `Payout Outflow: ${customerName}`,
+      TransactionType.SWIPE_PAY,
+      outflowEntries,
+      { customerId: customerId || undefined }
+    );
+
+    setStep1Errors({});
+    toast.success('Inflow & Outflow recorded! Transaction cycle complete.');
+    setSwipeAmount('');
+    setTransferCommission('0');
   };
 
   const handleStep2Submit = (e: React.FormEvent) => {
@@ -196,13 +214,10 @@ export const SwipePay: React.FC = () => {
       { customerId: customerId || undefined }
     );
 
-    toast.success("Transaction Cycle Complete!");
-    setStep(1);
-    setPhone('');
-    setIsPhoneLocked(false);
-    setSwipeAmount('');
+    toast.success('Outflow recorded successfully!');
+    resetCustomer();
+    setPayoutAmount('');
     setTransferCommission('0');
-    setStep1Errors({});
     setStep2Errors({});
   };
 
@@ -218,32 +233,31 @@ export const SwipePay: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 max-w-6xl mx-auto">
         
         <div className="lg:col-span-2 space-y-6">
-          {/* Progress Header */}
-          <div className="flex items-center justify-between p-6 bg-white/95 backdrop-blur-md rounded-3xl border-2 border-slate-100 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.06)]">
-            <div className={`flex items-center gap-4 ${step === 1 ? 'text-indigo-600' : 'text-slate-400'}`}>
-              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 font-black text-lg transition-all duration-300 ${step === 1 ? 'border-indigo-500 bg-gradient-to-br from-indigo-50 to-indigo-100 shadow-lg shadow-indigo-500/20' : 'border-slate-200 bg-slate-50'}`}>1</div>
-              <div>
-                <p className="font-black text-sm uppercase tracking-widest">Step 1: Inflow</p>
-                <p className="text-xs text-slate-500 font-semibold">Customer Swipe Details</p>
-              </div>
-            </div>
-            <div className="p-2 bg-slate-100 rounded-full"><ArrowRight className="text-slate-400 w-5 h-5" /></div>
-            <div className={`flex items-center gap-4 ${step === 2 ? 'text-emerald-600' : 'text-slate-400'}`}>
-              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border-2 font-black text-lg transition-all duration-300 ${step === 2 ? 'border-emerald-500 bg-gradient-to-br from-emerald-50 to-emerald-100 shadow-lg shadow-emerald-500/20' : 'border-slate-200 bg-slate-50'}`}>2</div>
-              <div>
-                <p className="font-black text-sm uppercase tracking-widest">Step 2: Outflow</p>
-                <p className="text-xs text-slate-500 font-semibold">Final Settle Payout</p>
-              </div>
-            </div>
+          {/* Mode Tabs: Separate Inflow | Outflow entries */}
+          <div className="flex gap-2 p-2 bg-slate-100 rounded-2xl">
+            <button
+              type="button"
+              onClick={() => { setMode('inflow'); resetCustomer(); setSwipeAmount(''); setStep1Errors({}); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-4 px-6 rounded-xl font-bold text-sm uppercase tracking-wider transition-all ${mode === 'inflow' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-200'}`}
+            >
+              <ArrowDownToLine size={20} /> Inflow Entry
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('outflow'); resetCustomer(); setPayoutAmount(''); setTransferCommission('0'); setStep2Errors({}); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-4 px-6 rounded-xl font-bold text-sm uppercase tracking-wider transition-all ${mode === 'outflow' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-200'}`}
+            >
+              <ArrowUpFromLine size={20} /> Outflow Entry
+            </button>
           </div>
 
-          <Card className={`border-t-4 ${step === 1 ? 'border-t-indigo-500' : 'border-t-emerald-500'}`}>
+          <Card className={`border-t-4 ${mode === 'inflow' ? 'border-t-indigo-500' : 'border-t-emerald-500'}`}>
             <CardHeader 
-              title={step === 1 ? "Inflow Data Entry" : "Outflow Data Entry"} 
-              subtitle={step === 1 ? "Identify customer via 10-digit phone" : "Verify net payout amount"} 
+              title={mode === 'inflow' ? "Inflow Data Entry" : "Outflow Data Entry"} 
+              subtitle={mode === 'inflow' ? "Record customer swipe (inflow)" : "Record payout settlement (outflow)"} 
             />
             <CardContent>
-              {step === 1 ? (
+              {mode === 'inflow' ? (
                 <div className="space-y-6">
                   {/* Phone Validation Section */}
                   <div className="p-5 bg-slate-50/80 rounded-xl border border-slate-200 space-y-4">
@@ -337,31 +351,61 @@ export const SwipePay: React.FC = () => {
                   )}
                 </div>
               ) : (
-                <form onSubmit={handleStep2Submit} className="space-y-6 animate-fade-in">
-                  <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200">
-                    <p className="text-xs text-emerald-700 font-bold uppercase mb-2 tracking-wider">Step 1 Completed</p>
-                    <p className="text-sm font-medium">Liability of <b>{formatCurrency(netPayableToCustomer)}</b> recorded for {customerName}.</p>
+                <div className="space-y-6 animate-fade-in">
+                  {/* Outflow: Customer lookup (same as Inflow - standalone) */}
+                  <div className="p-5 bg-slate-50/80 rounded-xl border border-slate-200 space-y-4">
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1">
+                        <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                          {isPhoneLocked ? <Lock size={14}/> : <Unlock size={14}/>} Mobile Number (10 Digits)
+                        </label>
+                        <input 
+                          type="text"
+                          maxLength={10}
+                          className={`w-full px-4 py-3 border rounded-xl outline-none transition-all duration-200 text-lg font-mono ${isPhoneLocked ? 'bg-slate-100 text-slate-500 border-slate-300' : 'border-emerald-300 focus:ring-2 focus:ring-emerald-500/30 font-bold'}`}
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+                          disabled={isPhoneLocked}
+                          placeholder="00000 00000"
+                        />
+                      </div>
+                      {isPhoneLocked ? (
+                        <Button type="button" variant="outline" onClick={resetCustomer} className="h-[52px]">Change</Button>
+                      ) : (
+                        <Button type="button" onClick={handlePhoneSearch} disabled={phone.length !== 10} className="h-[52px] bg-emerald-600 hover:bg-emerald-700">Search</Button>
+                      )}
+                    </div>
+                    {isPhoneLocked && !isNewCustomer && (
+                      <div className="p-4 bg-white rounded-xl border border-slate-200 flex justify-between items-center">
+                        <div>
+                          <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Customer</p>
+                          <p className="font-bold text-slate-900">{customerName}</p>
+                        </div>
+                        <CheckCircle2 className="text-emerald-600" size={20}/>
+                      </div>
+                    )}
+                    {isPhoneLocked && isNewCustomer && (
+                      <p className="text-sm text-amber-700">Customer not found. Create via Inflow first.</p>
+                    )}
                   </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Input label="Settlement Amount" type="number" value={payoutAmount} onChange={e => { setPayoutAmount(e.target.value); setStep2Errors(p => ({...p, payoutAmount: ''})); }} className="font-bold" error={step2Errors.payoutAmount} placeholder="0" />
-                    <Input label="Wallet Transfer Fee (₹)" type="number" value={transferCommission} onChange={e => { setTransferCommission(e.target.value); setStep2Errors(p => ({...p, transferCommission: ''})); }} error={step2Errors.transferCommission} placeholder="0" />
-                  </div>
-                  
-                  <Select 
-                    label="Payout Source Account" 
-                    value={payoutAccountId} 
-                    onChange={e => setPayoutAccountId(e.target.value)} 
-                    options={accounts.filter(a => ['Bank','Cash','Wallet'].includes(a.category)).map(a => ({ label: `${a.name} (${formatCurrency(getAccountBalance(a.id))})`, value: a.id }))} 
-                  />
-                  
-                  <Input label="Internal Note" placeholder="IMPS Ref / Transfer Reason" value={transactionNote} onChange={e => setTransactionNote(e.target.value)} />
 
-                  <div className="grid grid-cols-2 gap-4 pt-4">
-                    <Button type="button" variant="outline" onClick={() => setStep(1)}>Back to Step 1</Button>
-                    <Button type="submit" variant="success">Finish Outflow</Button>
-                  </div>
-                </form>
+                  {isPhoneLocked && !isNewCustomer && (
+                    <form onSubmit={handleStep2Submit} className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Input label="Settlement Amount (₹)" type="number" value={payoutAmount} onChange={e => { setPayoutAmount(e.target.value); setStep2Errors(p => ({...p, payoutAmount: ''})); }} className="font-bold" error={step2Errors.payoutAmount} placeholder="0" />
+                        <Input label="Wallet Transfer Fee (₹)" type="number" value={transferCommission} onChange={e => { setTransferCommission(e.target.value); setStep2Errors(p => ({...p, transferCommission: ''})); }} error={step2Errors.transferCommission} placeholder="0" />
+                      </div>
+                      <Select 
+                        label="Payout To Account" 
+                        value={payoutAccountId} 
+                        onChange={e => setPayoutAccountId(e.target.value)} 
+                        options={accounts.filter(a => ['Bank','Cash','Wallet'].includes(a.category)).map(a => ({ label: `${a.name} (${formatCurrency(getAccountBalance(a.id))})`, value: a.id }))} 
+                      />
+                      <Input label="Internal Note" placeholder="IMPS Ref / Transfer Reason" value={transactionNote} onChange={e => setTransactionNote(e.target.value)} />
+                      <Button type="submit" variant="success" size="lg" className="w-full">Record Outflow</Button>
+                    </form>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>
@@ -376,7 +420,7 @@ export const SwipePay: React.FC = () => {
               className="bg-gradient-to-r from-indigo-900/90 to-slate-800 border-slate-600/50 [&>div>h3]:text-white [&>div>h3]:text-xl [&>div>p]:text-slate-300"
             />
             <CardContent className="bg-slate-800/50 rounded-2xl mx-4 mb-4 p-6 border border-slate-600/50">
-              {step === 1 ? (
+              {mode === 'inflow' ? (
                 <div className="space-y-6">
                    <div className="flex justify-between items-center">
                      <span className="text-base font-semibold text-slate-200">Swipe Amount</span>
@@ -420,12 +464,14 @@ export const SwipePay: React.FC = () => {
             </CardContent>
           </Card>
           
-          <Card className="bg-indigo-50/80 border-indigo-100">
-            <CardContent className="flex items-start gap-3 text-sm text-indigo-800 font-medium">
-              <Info className="shrink-0 mt-0.5 text-indigo-600" size={16}/>
-              <p>The "Applied Rate" can be manually adjusted for one-time deals if necessary.</p>
-            </CardContent>
-          </Card>
+          {mode === 'inflow' && (
+            <Card className="bg-indigo-50/80 border-indigo-100">
+              <CardContent className="flex items-start gap-3 text-sm text-indigo-800 font-medium">
+                <Info className="shrink-0 mt-0.5 text-indigo-600" size={16}/>
+                <p>The "Applied Rate" can be manually adjusted for one-time deals if necessary.</p>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
       </div>

@@ -11,9 +11,9 @@ import { DEFAULT_COMMISSION_RATES } from '../constants';
 export const PaySwipe: React.FC = () => {
   const { customers, wallets, accounts, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer } = useERP();
   const toast = useToast();
-  const [step, setStep] = useState<1|2>(1);
-  
-  // --- Step 1 State: Customer & Advance ---
+  const [mode, setMode] = useState<'advance' | 'recovery'>('advance');
+
+  // --- Shared: Customer ---
   const [phone, setPhone] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerId, setCustomerId] = useState<string | null>(null);
@@ -21,21 +21,33 @@ export const PaySwipe: React.FC = () => {
   const [commissionRates, setCommissionRates] = useState<Rates>(DEFAULT_COMMISSION_RATES);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // --- Pay Advance State ---
   const [payAmount, setPayAmount] = useState<string>('');
   const [paySourceId, setPaySourceId] = useState('A002');
-  
-  // --- Step 2 State: Recovery ---
-  const [step2Errors, setStep2Errors] = useState<Record<string, string>>({});
+
+  // --- Swipe Recovery State ---
+  const [recoveryErrors, setRecoveryErrors] = useState<Record<string, string>>({});
+  const [recoveryAmount, setRecoveryAmount] = useState<string>('');
   const [swipeWalletId, setSwipeWalletId] = useState(wallets[0]?.id || '');
   const [pgName, setPgName] = useState('');
   const [cardType, setCardType] = useState('visa');
-  
   const [collectionAmount, setCollectionAmount] = useState<string>('');
   const [collectAccount, setCollectAccount] = useState('A001');
   const [appliedMdrPercent, setAppliedMdrPercent] = useState<string>('0');
-  
-  // Editable Commission Rate for this transaction
   const [currentCommRate, setCurrentCommRate] = useState<string>('0');
+
+  const resetForm = () => {
+    setPhone('');
+    setCustomerName('');
+    setCustomerId(null);
+    setIsNewCustomer(false);
+    setPayAmount('');
+    setRecoveryAmount('');
+    setCollectionAmount('');
+    setErrors({});
+    setRecoveryErrors({});
+  };
+
 
   // Customer Lookup
   const handlePhoneBlur = () => {
@@ -54,6 +66,7 @@ export const PaySwipe: React.FC = () => {
       setIsNewCustomer(true);
     }
     setErrors(p => ({ ...p, phone: '' }));
+    setRecoveryErrors(p => ({ ...p, phone: '' }));
   };
 
   const selectedWallet = wallets.find(w => w.id === swipeWalletId);
@@ -73,26 +86,23 @@ export const PaySwipe: React.FC = () => {
     setCurrentCommRate(rate.toString());
   }, [cardType, commissionRates]);
 
-  // Sync MDR % from PG when wallet/pg/card changes (user can override manually)
+  // Sync MDR % from PG when wallet/pg/card changes; auto-calc collection for both advance & recovery
   useEffect(() => {
     if (selectedWallet && selectedPG && cardType) {
       // @ts-ignore
       const mdr = selectedPG.charges[cardType] || 0;
       setAppliedMdrPercent(mdr.toString());
     }
-  }, [swipeWalletId, pgName, cardType, selectedWallet, selectedPG]);
-
-  // Auto-calculate suggested collection amount based on Advance Amount * Commission Rate
-  useEffect(() => {
-    if (payAmount) {
-      const amt = safeParseFloat(payAmount);
+    const amt = mode === 'advance' ? safeParseFloat(payAmount) : safeParseFloat(recoveryAmount);
+    if (amt > 0) {
       const rate = safeParseFloat(currentCommRate);
       const suggestedCollection = roundCurrency(amt * (rate / 100));
       setCollectionAmount(suggestedCollection.toString());
     }
-  }, [payAmount, currentCommRate]);
+  }, [swipeWalletId, pgName, cardType, payAmount, recoveryAmount, mode, selectedWallet, selectedPG, currentCommRate]);
 
   const amount = safeParseFloat(payAmount);
+  const recoveryAmt = safeParseFloat(recoveryAmount);
   const collAmount = safeParseFloat(collectionAmount);
   const mdrPercent = safeParseFloat(appliedMdrPercent);
 
@@ -137,40 +147,55 @@ export const PaySwipe: React.FC = () => {
       entries,
       { customerId: finalId || undefined }
     );
-    setStep(2);
+    toast.success("Advance recorded successfully!");
+    resetForm();
   };
 
-  const validateStep2 = (): boolean => {
+  const resetRecoveryForm = () => {
+    setPhone('');
+    setCustomerName('');
+    setCustomerId(null);
+    setRecoveryAmount('');
+    setCollectionAmount('');
+    setRecoveryErrors({});
+  };
+
+  const validateRecovery = (): boolean => {
     const err: Record<string, string> = {};
+    const p = phone.trim().replace(/\D/g, '');
+    if (!p) err.phone = 'Phone number is required';
+    else if (p.length !== 10) err.phone = 'Phone must be exactly 10 digits';
+    if (!customerId) err.phone = err.phone || 'Customer not found. Create via Pay Advance first.';
+    if (!recoveryAmount?.trim()) err.recoveryAmount = 'Recovery amount is required';
+    else if (recoveryAmt <= 0) err.recoveryAmount = 'Recovery amount must be greater than 0';
     const coll = safeParseFloat(collectionAmount);
     if (isNaN(coll) || coll < 0) err.collectionAmount = 'Charges collected must be 0 or more';
     const rateVal = safeParseFloat(currentCommRate);
     if (isNaN(rateVal) || rateVal < 0 || rateVal > 100) err.currentCommRate = 'Rate must be between 0 and 100%';
-    setStep2Errors(err);
+    setRecoveryErrors(err);
     return Object.keys(err).length === 0;
   };
 
-  const handleStep2 = (e: React.FormEvent) => {
+  const handleRecovery = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateStep2()) return;
+    if (!validateRecovery()) return;
     const wallet = wallets.find(w => w.id === swipeWalletId);
     if (!wallet) return;
 
-    // 1. Update Customer Rate if changed
     const rateVal = safeParseFloat(currentCommRate);
     if (customerId) {
-        const updatedRates = { ...commissionRates, [cardType]: rateVal };
-        updateCustomer(customerId, { commissionRates: updatedRates });
+      const updatedRates = { ...commissionRates, [cardType]: rateVal };
+      updateCustomer(customerId, { commissionRates: updatedRates });
     }
 
-    // 2. Financial Calculation: PG charges MDR, so wallet receives (amount - MDR)
-    const mdr = roundCurrency(amount * (mdrPercent / 100));
-    const netToWallet = roundCurrency(amount - mdr);
+    // 2. Financial Calculation: PG charges MDR, so wallet receives (recoveryAmt - MDR)
+    const mdr = roundCurrency(recoveryAmt * (mdrPercent / 100));
+    const netToWallet = roundCurrency(recoveryAmt - mdr);
 
     const entries: LedgerEntry[] = [
       // 1. Principal Recovery: Wallet receives NET (after MDR), Customer Debt cleared
       { accountId: wallet.ledgerAccountId, debit: netToWallet, credit: 0 },
-      { accountId: 'A006', debit: 0, credit: amount },
+      { accountId: 'A006', debit: 0, credit: recoveryAmt },
       { accountId: 'E001', debit: mdr, credit: 0 },
       
       // 2. Charges Collection (Bank UP, Income UP)
@@ -179,38 +204,30 @@ export const PaySwipe: React.FC = () => {
     ];
 
     postTransaction(
-      `Recovery: ${customerName} (${cardType.toUpperCase()})`, 
-      TransactionType.PAY_SWIPE, 
+      `Recovery: ${customerName} (${cardType.toUpperCase()})`,
+      TransactionType.PAY_SWIPE,
       entries,
-      { 
-        customerId: customerId || undefined,
-        walletId: wallet.id,
-        cardType: cardType
-      }
+      { customerId: customerId || undefined, walletId: wallet.id, cardType: cardType }
     );
-    toast.success("Cycle Completed!");
-    setStep(1);
-    setPayAmount('');
-    setCollectionAmount('');
-    setPhone('');
-    setCustomerName('');
-    setCustomerId(null);
-    setErrors({});
-    setStep2Errors({});
+    toast.success("Recovery recorded successfully!");
+    resetRecoveryForm();
   };
 
   return (
     <Layout title="Pay & Swipe (Advance Flow)">
       <div className="max-w-3xl mx-auto">
-        <div className="flex items-center gap-4 mb-8 p-5 bg-white rounded-2xl shadow-card border border-slate-100">
-           <StepIndicator num={1} title="Pay Advance" active={step === 1} done={step > 1} />
-           <div className="flex-1 h-0.5 bg-slate-200 rounded" />
-           <StepIndicator num={2} title="Swipe Recovery" active={step === 2} done={false} />
+        <div className="flex items-center gap-2 p-2 bg-slate-100 rounded-2xl mb-8">
+          <button type="button" onClick={() => { setMode('advance'); resetForm(); }} className={`flex-1 py-3 px-5 rounded-xl font-bold transition-all ${mode === 'advance' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-white'}`}>
+            Pay Advance
+          </button>
+          <button type="button" onClick={() => { setMode('recovery'); resetForm(); }} className={`flex-1 py-3 px-5 rounded-xl font-bold transition-all ${mode === 'recovery' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-600 hover:bg-white'}`}>
+            Swipe Recovery
+          </button>
         </div>
 
         <Card>
           <CardContent className="pt-6">
-            {step === 1 ? (
+            {mode === 'advance' ? (
               <form onSubmit={handleStep1} className="space-y-6">
                 <div className="bg-indigo-50/60 p-5 rounded-xl border border-indigo-100 grid grid-cols-2 gap-4">
                     <div className="relative col-span-2 md:col-span-1">
@@ -240,10 +257,29 @@ export const PaySwipe: React.FC = () => {
                 <Button type="submit" className="w-full">Pay Bill (Record Advance) <ArrowRight size={16}/></Button>
               </form>
             ) : (
-              <form onSubmit={handleStep2} className="space-y-6">
-                <div className="bg-emerald-50 p-5 rounded-xl border border-emerald-100">
-                  <p className="text-sm font-medium text-emerald-800">Recovering: <span className="font-bold">{formatCurrency(amount)}</span> from {customerName}</p>
+              <form onSubmit={handleRecovery} className="space-y-6">
+                <div className="bg-slate-50/80 p-5 rounded-xl border border-slate-200 space-y-4">
+                  <div className="relative">
+                    <Input label="Customer Phone" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} onBlur={handlePhoneBlur} placeholder="10-digit phone" error={recoveryErrors.phone} maxLength={10} />
+                    <div className="absolute right-4 top-10 text-slate-400 pointer-events-none"><Search size={16}/></div>
+                  </div>
+                  {customerId && !isNewCustomer && (
+                    <div className="p-4 bg-white rounded-xl border border-emerald-200 flex justify-between items-center">
+                      <div>
+                        <p className="text-xs text-slate-500 font-bold uppercase">Linked Profile</p>
+                        <p className="font-bold text-slate-900">{customerName}</p>
+                      </div>
+                      <CheckCircle2 className="text-emerald-600" size={20}/>
+                    </div>
+                  )}
+                  {isNewCustomer && (
+                    <p className="text-sm text-amber-600 font-medium">Customer not found. Create via Pay Advance first.</p>
+                  )}
                 </div>
+
+                {customerId && !isNewCustomer && (
+                  <>
+                <Input label="Recovery Amount (₹)" type="number" className="font-bold text-lg" value={recoveryAmount} onChange={e => { setRecoveryAmount(e.target.value); setRecoveryErrors(p => ({...p, recoveryAmount: ''})); }} error={recoveryErrors.recoveryAmount} placeholder="0" />
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Select label="Swipe Into Wallet" value={swipeWalletId} onChange={e => setSwipeWalletId(e.target.value)} options={wallets.map(w => ({ label: w.name, value: w.id }))} />
@@ -272,8 +308,8 @@ export const PaySwipe: React.FC = () => {
                     type="number" 
                     step="0.1" 
                     value={currentCommRate} 
-                    onChange={e => { setCurrentCommRate(e.target.value); setStep2Errors(p => ({...p, currentCommRate: ''})); }} 
-                    error={step2Errors.currentCommRate}
+                    onChange={e => { setCurrentCommRate(e.target.value); setRecoveryErrors(p => ({...p, currentCommRate: ''})); }} 
+                    error={recoveryErrors.currentCommRate}
                   />
                   <Input 
                     label="Applied MDR %" 
@@ -287,18 +323,20 @@ export const PaySwipe: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Input label="Charges Collected" type="number" value={collectionAmount} onChange={e => { setCollectionAmount(e.target.value); setStep2Errors(p => ({...p, collectionAmount: ''})); }} error={step2Errors.collectionAmount} />
+                    <Input label="Charges Collected" type="number" value={collectionAmount} onChange={e => { setCollectionAmount(e.target.value); setRecoveryErrors(p => ({...p, collectionAmount: ''})); }} error={recoveryErrors.collectionAmount} />
                     <p className="text-xs text-slate-500 mt-1.5 font-medium">Calculated via {currentCommRate}%</p>
                   </div>
                   <Select label="Collected Into" value={collectAccount} onChange={e => setCollectAccount(e.target.value)} options={accounts.filter(a => ['Bank', 'Cash', 'Wallet'].includes(a.category)).map(a => ({ label: a.name, value: a.id }))} />
                 </div>
                 
                 <div className="flex flex-wrap justify-end gap-4 text-xs font-medium">
-                  <span className="text-slate-500">Est. MDR Cost: {formatCurrency(mdrPercent > 0 ? roundCurrency(amount * (mdrPercent / 100)) : 0)}</span>
-                  <span className="text-emerald-600">Net to Wallet: {formatCurrency(Math.max(0, amount - (mdrPercent > 0 ? roundCurrency(amount * (mdrPercent / 100)) : 0)))}</span>
+                  <span className="text-slate-500">Est. MDR Cost: {formatCurrency(mdrPercent > 0 ? roundCurrency(recoveryAmt * (mdrPercent / 100)) : 0)}</span>
+                  <span className="text-emerald-600">Net to Wallet: {formatCurrency(Math.max(0, recoveryAmt - (mdrPercent > 0 ? roundCurrency(recoveryAmt * (mdrPercent / 100)) : 0)))}</span>
                 </div>
 
                 <Button type="submit" variant="success" className="w-full">Complete Recovery</Button>
+                  </>
+                )}
               </form>
             )}
           </CardContent>
@@ -307,12 +345,3 @@ export const PaySwipe: React.FC = () => {
     </Layout>
   );
 };
-
-const StepIndicator = ({ num, title, active, done }: any) => (
-  <div className={`flex items-center gap-3 ${active ? 'text-indigo-600' : 'text-slate-400'}`}>
-    <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold transition-all duration-200 ${active ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/30' : done ? 'bg-emerald-500 text-white' : 'bg-slate-100'}`}>
-      {done ? <CheckCircle2 size={20} /> : num}
-    </div>
-    <span className="font-semibold">{title}</span>
-  </div>
-);

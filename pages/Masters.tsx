@@ -696,7 +696,7 @@ const WalletsView = () => {
     e.preventDefault();
     if (!editingPG) return;
     const err: Record<string, string> = {};
-    if (!editingPG.pgName && !pgForm.name?.trim()) err.name = 'PG name is required';
+    if (!pgForm.name?.trim()) err.name = 'PG name is required';
     (['visa', 'master', 'amex', 'rupay'] as const).forEach(key => {
       const v = safeParseFloat(pgForm[key]);
       if (pgForm[key] !== '' && (isNaN(v) || v < 0 || v > 100)) err[key] = 'Must be 0–100%';
@@ -705,7 +705,7 @@ const WalletsView = () => {
     if (Object.keys(err).length > 0) return;
 
     const config: PGConfig = {
-      name: editingPG.pgName || pgForm.name.trim(),
+      name: pgForm.name.trim(),
       charges: {
         visa: safeParseFloat(pgForm.visa) || 0,
         master: safeParseFloat(pgForm.master) || 0,
@@ -770,7 +770,7 @@ const WalletsView = () => {
             />
             <CardContent>
               <form onSubmit={handlePGSubmit} className="space-y-4">
-                <Input label="PG Name" value={pgForm.name} onChange={e => { setPgForm({...pgForm, name: e.target.value}); setPgErrors(p => ({...p, name: ''})); }} disabled={!!editingPG.pgName} error={pgErrors.name} placeholder="e.g. Razorpay PG" />
+                <Input label="PG Name" value={pgForm.name} onChange={e => { setPgForm({...pgForm, name: e.target.value}); setPgErrors(p => ({...p, name: ''})); }} error={pgErrors.name} placeholder="e.g. Razorpay PG" />
                 <div className="grid grid-cols-2 gap-4">
                   <Input label="Visa %" type="number" step="0.1" value={pgForm.visa} onChange={e => { setPgForm({...pgForm, visa: e.target.value}); setPgErrors(p => ({...p, visa: ''})); }} error={pgErrors.visa} placeholder="0" />
                   <Input label="Master %" type="number" step="0.1" value={pgForm.master} onChange={e => { setPgForm({...pgForm, master: e.target.value}); setPgErrors(p => ({...p, master: ''})); }} error={pgErrors.master} placeholder="0" />
