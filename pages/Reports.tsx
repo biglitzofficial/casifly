@@ -27,7 +27,7 @@ const getTypeLabel = (type: TransactionType) => {
 };
 
 export const Reports: React.FC = () => {
-  const { transactions, wallets, customers, formatCurrency, generateBalanceSheet, generateProfitAndLoss } = useERP();
+  const { transactions, wallets, customers, formatCurrency, generateBalanceSheet, generateProfitAndLoss, getAccountBalance, getAccountBalanceAsOf } = useERP();
   const [activeTab, setActiveTab] = useState<ReportTab>('overview');
   const [search, setSearch] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>({ from: '', to: '', preset: 'allTime' });
@@ -66,6 +66,23 @@ export const Reports: React.FC = () => {
 
   const balanceSheet = generateBalanceSheet();
   const plReport = generateProfitAndLoss();
+
+  // End of yesterday (for wallet balance movement)
+  const endOfYesterdayIso = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    d.setHours(23, 59, 59, 999);
+    return d.toISOString();
+  }, []);
+
+  const walletBalanceMovement = useMemo(() =>
+    wallets.map(w => {
+      const yesterday = getAccountBalanceAsOf(w.ledgerAccountId, endOfYesterdayIso);
+      const today = getAccountBalance(w.ledgerAccountId);
+      return { wallet: w, yesterday, today, difference: today - yesterday };
+    }),
+    [wallets, getAccountBalanceAsOf, getAccountBalance, endOfYesterdayIso]
+  );
 
   // --- Aggregation Logic (uses filtered transactions) ---
   const calculatePL = (txns: Transaction[]) => {
@@ -340,6 +357,24 @@ export const Reports: React.FC = () => {
                     </div>
                   )}
                 </div>
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader title="Wallet Balance Movement" subtitle="Yesterday vs today — inflows add to wallet, outflows reduce" />
+              <div className="p-6">
+                <DataTable
+                  headers={['Wallet', 'Yesterday Balance', 'Today Balance', 'Difference']}
+                  rows={walletBalanceMovement.map(({ wallet, yesterday, today, difference }) => [
+                    <span className="font-semibold">{wallet.name}</span>,
+                    formatCurrency(yesterday),
+                    formatCurrency(today),
+                    <span className={`font-bold tabular-nums ${difference >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {difference >= 0 ? '+' : ''}{formatCurrency(difference)}
+                    </span>
+                  ])}
+                  rightAlignColumns={[1, 2, 3]}
+                />
               </div>
             </Card>
           </div>

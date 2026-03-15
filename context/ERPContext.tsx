@@ -33,6 +33,8 @@ interface ERPContextType {
 
   // Getters
   getAccountBalance: (accountId: string) => number;
+  /** Balance as of end of given date (ISO string). Uses only transactions with date <= asOfDateIso. */
+  getAccountBalanceAsOf: (accountId: string, asOfDateIso: string) => number;
   getLedger: (accountId: string) => Transaction[];
   generateBalanceSheet: () => BalanceSheet;
   generateProfitAndLoss: () => ProfitAndLoss;
@@ -375,6 +377,30 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Getters
   const getAccountBalance = (accountId: string) => accountBalances[accountId] || 0;
+
+  const getAccountBalanceAsOf = useCallback((accountId: string, asOfDateIso: string) => {
+    let txnsToUse = productId
+      ? transactions.filter(t => t.status === 'COMPLETED' && (t.metadata?.storeId ?? '') === productId)
+      : transactions.filter(t => t.status === 'COMPLETED');
+    txnsToUse = txnsToUse.filter(t => t.date <= asOfDateIso);
+    const acc = accounts.find(a => a.id === accountId);
+    if (!acc) return 0;
+    let balance = productId ? 0 : (acc.balance || 0);
+    txnsToUse.forEach(txn => {
+      txn.entries.forEach(entry => {
+        if (entry.accountId !== accountId) return;
+        const a = accounts.find(x => x.id === entry.accountId);
+        if (!a) return;
+        if (a.type === AccountType.ASSET || a.type === AccountType.EXPENSE) {
+          balance += (entry.debit || 0) - (entry.credit || 0);
+        } else {
+          balance += (entry.credit || 0) - (entry.debit || 0);
+        }
+      });
+    });
+    return balance;
+  }, [transactions, accounts, productId]);
+
   const getLedger = (accountId: string) => transactionsForUser.filter(txn => txn.entries.some(e => e.accountId === accountId));
 
   const generateProfitAndLoss = (): ProfitAndLoss => {
@@ -474,6 +500,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       postTransaction,
       deleteTransaction,
       getAccountBalance,
+      getAccountBalanceAsOf,
       getLedger,
       formatCurrency,
       reconcileWallet,
