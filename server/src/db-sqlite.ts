@@ -106,7 +106,7 @@ export const sqliteDb = {
 
   getCustomers: (storeId?: string) => {
     const rows = storeId
-      ? sqlite.prepare('SELECT * FROM customers WHERE store_id = ?').all(storeId)
+      ? sqlite.prepare('SELECT * FROM customers WHERE store_id IS NULL OR store_id = ?').all(storeId)
       : sqlite.prepare('SELECT * FROM customers').all();
     return Promise.resolve((rows as any[]).sort((a, b) => (b.joined_at || '').localeCompare(a.joined_at || '')));
   },

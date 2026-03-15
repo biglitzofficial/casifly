@@ -19,6 +19,13 @@ const CARD_NETWORK_OPTIONS = [
   { value: 'rupay', label: 'Rupay' },
 ];
 
+const getTypeLabel = (type: TransactionType) => {
+  if (type === TransactionType.SWIPE_PAY) return 'Swipe Pay';
+  if (type === TransactionType.PAY_SWIPE) return 'Pay Swipe';
+  if (type === TransactionType.MONEY_TRANSFER) return 'Money Transfer';
+  return String(type);
+};
+
 export const Reports: React.FC = () => {
   const { transactions, wallets, customers, formatCurrency, generateBalanceSheet, generateProfitAndLoss } = useERP();
   const [activeTab, setActiveTab] = useState<ReportTab>('overview');
@@ -96,23 +103,55 @@ export const Reports: React.FC = () => {
     };
   }).sort((a, b) => b.profit - a.profit).slice(0, 10);
 
+  const extractAmountsFromEntries = (t: Transaction) => {
+    let amountSwiped = 0;
+    let amountLoaded = 0;
+    let amountTransferred = 0;
+    const walletIds = wallets.map(w => w.ledgerAccountId);
+    t.entries.forEach(e => {
+      if (e.accountId === 'L001') {
+        if (e.credit > 0) amountSwiped += e.credit;
+      }
+      if (walletIds.includes(e.accountId)) {
+        amountLoaded += e.debit;
+        amountTransferred += e.credit;
+      }
+      if (e.accountId === 'A006') {
+        if (e.debit > 0) amountLoaded += e.debit;
+        if (e.credit > 0) amountSwiped += e.credit;
+      }
+      if (['A001', 'A002', 'A003'].includes(e.accountId) && e.debit > 0) amountLoaded += e.debit;
+    });
+    return { amountSwiped, amountLoaded, amountTransferred };
+  };
+
   const txnPL = useMemo(() => {
+    const relevantTypes = [TransactionType.SWIPE_PAY, TransactionType.PAY_SWIPE, TransactionType.MONEY_TRANSFER];
     let data = filteredTransactions
-      .filter(t => t.type === TransactionType.SWIPE_PAY && t.metadata?.walletId)
+      .filter(t => relevantTypes.includes(t.type) && (t.metadata?.customerId || t.metadata?.walletId))
       .map(t => {
         const customer = customers.find(c => c.id === t.metadata?.customerId);
+        const wallet = wallets.find(w => w.id === t.metadata?.walletId);
         const { income, expense, profit } = calculatePL([t]);
+        const { amountSwiped, amountLoaded, amountTransferred } = extractAmountsFromEntries(t);
+        const portal = wallet?.pgs?.[0]?.name || '—';
         return { 
           id: t.id,
+          type: t.type,
+          typeLabel: getTypeLabel(t.type),
           date: t.date,
           customerId: t.metadata?.customerId,
           customer: customer?.name || 'Unknown',
           walletId: t.metadata?.walletId,
-          wallet: wallets.find(w => w.id === t.metadata?.walletId)?.name || 'N/A',
-          card: t.metadata?.cardType?.toUpperCase() || 'N/A',
+          wallet: wallet?.name || 'N/A',
+          portal,
+          card: t.metadata?.cardType?.toUpperCase() || '—',
+          amountSwiped,
+          amountLoaded,
+          amountTransferred,
           revenue: income,
           cost: expense,
-          profit: profit
+          profit
         };
       });
     if (txnCustomerFilter !== 'all') {
@@ -159,14 +198,17 @@ export const Reports: React.FC = () => {
   };
 
   const exportTxnPL = () => {
-    const headers = ['Date', 'Customer', 'Wallet', 'Card', 'Revenue', 'Cost', 'Profit'];
+    const headers = ['Date', 'Customer Name', 'Type', 'Card', 'Wallet', 'Portal', 'Amount Swiped', 'Amount Loaded', 'Amount Transferred', 'Profit Earned'];
     const rows = txnPL.map(r => [
       new Date(r.date).toLocaleDateString(),
       r.customer,
-      r.wallet,
+      r.typeLabel,
       r.card,
-      formatCurrency(r.revenue),
-      formatCurrency(r.cost),
+      r.wallet,
+      r.portal,
+      formatCurrency(r.amountSwiped),
+      formatCurrency(r.amountLoaded),
+      formatCurrency(r.amountTransferred),
       formatCurrency(r.profit),
     ]);
     exportToCSV('transaction-pl', headers, rows);
@@ -396,15 +438,20 @@ export const Reports: React.FC = () => {
             <Card>
             <CardHeader title="Individual Transaction Profitability" subtitle="Real-time margin analysis per swipe" action={<Button size="sm" variant="outline" onClick={exportTxnPL}><Download size={14} /> Export CSV</Button>} />
             <DataTable 
-              headers={['Date', 'Customer', 'Card/Wallet', 'Revenue', 'Cost', 'Net Profit']}
+              headers={['Date', 'Customer Name', 'Type', 'Card', 'Wallet', 'Portal', 'Amount Swiped', 'Amount Loaded', 'Amount Transferred', 'Profit Earned']}
               rows={txnPL.map(t => [
                 new Date(t.date).toLocaleDateString(),
                 t.customer,
-                <div className="text-xs"><span className="font-bold">{t.card}</span> • {t.wallet}</div>,
-                formatCurrency(t.revenue),
-                formatCurrency(t.cost),
+                t.typeLabel,
+                t.card,
+                t.wallet,
+                t.portal,
+                formatCurrency(t.amountSwiped),
+                formatCurrency(t.amountLoaded),
+                formatCurrency(t.amountTransferred),
                 <span className={`font-bold ${t.profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(t.profit)}</span>
               ])}
+              rightAlignColumns={[6, 7, 8, 9]}
             />
           </Card>
           </>

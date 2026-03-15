@@ -132,15 +132,24 @@ export const firestoreDb = {
     await fs().collection(C.accounts).doc(id).delete();
   },
 
-  // Customers
+  // Customers — store users get global (store_id null) + store-specific, same as wallets
   async getCustomers(storeId?: string) {
     const col = fs().collection(C.customers);
-    let snap;
     if (storeId) {
-      snap = await col.where('store_id', '==', storeId).get();
-    } else {
-      snap = await col.get();
+      const [globalSnap, storeSnap] = await Promise.all([
+        col.where('store_id', '==', null).get(),
+        col.where('store_id', '==', storeId).get(),
+      ]);
+      const seen = new Set<string>();
+      const rows: any[] = [];
+      [...globalSnap.docs, ...storeSnap.docs].forEach((d: { id: string; data: () => any }) => {
+        if (seen.has(d.id)) return;
+        seen.add(d.id);
+        rows.push({ ...d.data(), id: d.id });
+      });
+      return rows.sort((a: any, b: any) => (b.joined_at || '').localeCompare(a.joined_at || ''));
     }
+    const snap = await col.get();
     const rows = snap.docs.map((d: { id: string; data: () => any }) => ({ ...d.data(), id: d.id }));
     return rows.sort((a: any, b: any) => (b.joined_at || '').localeCompare(a.joined_at || ''));
   },

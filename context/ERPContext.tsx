@@ -115,10 +115,10 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return transactions.filter(t => (t.metadata?.storeId ?? '') === productId);
   }, [transactions, productId]);
 
-  // Filter customers for store user: only their store's customers
+  // Filter customers for store user: global (no storeId) + store-specific — same base for all processes
   const customersForUser = useMemo(() => {
     if (!productId) return customers;
-    return customers.filter(c => c.storeId === productId);
+    return customers.filter(c => !c.storeId || c.storeId === productId);
   }, [customers, productId]);
 
   // --- Derived State (Balances) ---
