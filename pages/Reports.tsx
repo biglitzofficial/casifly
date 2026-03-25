@@ -4,10 +4,17 @@ import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent } from '../components/ui/Elements';
 import { PageFilters, DateRange, FilterSection } from '../components/ui/PageFilters';
 import { Transaction, TransactionType } from '../types';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { TrendingUp, TrendingDown, ReceiptText, User, CreditCard, Wallet as WalletIcon, Scale, FileText, Download } from 'lucide-react';
 import { exportToCSV } from '../lib/export';
 import { Button } from '../components/ui/Elements';
+import { useAuth } from '../context/AuthContext';
+import {
+  isSwipePayInflow,
+  parseSwipeInflowEconomics,
+  inferPgName,
+  buildTransferExpensePerInflowId,
+} from '../lib/swipeTxnEconomics';
 
 type ReportTab = 'overview' | 'balance-sheet' | 'pl' | 'transactions' | 'card' | 'wallet' | 'customer';
 
@@ -23,14 +30,10 @@ const CARD_NETWORK_OPTIONS = [
   { value: 'rupay', label: 'Rupay' },
 ];
 
-const getTypeLabel = (type: TransactionType) => {
-  if (type === TransactionType.SWIPE_PAY) return 'Swipe Pay';
-  if (type === TransactionType.PAY_SWIPE) return 'Pay Swipe';
-  if (type === TransactionType.MONEY_TRANSFER) return 'Money Transfer';
-  return String(type);
-};
+const formatPct = (n: number) => `${n.toFixed(2)}%`;
 
 export const Reports: React.FC = () => {
+  const { user } = useAuth();
   const { transactions, wallets, customers, formatCurrency, generateBalanceSheet, generateProfitAndLoss, getAccountBalancesAsOf } = useERP();
   const [activeTab, setActiveTab] = useState<ReportTab>('overview');
   const [search, setSearch] = useState('');
@@ -134,55 +137,49 @@ export const Reports: React.FC = () => {
     };
   }).sort((a, b) => b.profit - a.profit).slice(0, 10);
 
-  const extractAmountsFromEntries = (t: Transaction) => {
-    let amountSwiped = 0;
-    let amountLoaded = 0;
-    let amountTransferred = 0;
-    const walletIds = wallets.map(w => w.ledgerAccountId);
-    t.entries.forEach(e => {
-      if (e.accountId === 'L001') {
-        if (e.credit > 0) amountSwiped += e.credit;
-      }
-      if (walletIds.includes(e.accountId)) {
-        amountLoaded += e.debit;
-        amountTransferred += e.credit;
-      }
-      if (e.accountId === 'A006') {
-        if (e.debit > 0) amountLoaded += e.debit;
-        if (e.credit > 0) amountSwiped += e.credit;
-      }
-      if (['A001', 'A002', 'A003'].includes(e.accountId) && e.debit > 0) amountLoaded += e.debit;
-    });
-    return { amountSwiped, amountLoaded, amountTransferred };
-  };
-
   const txnPL = useMemo(() => {
-    const relevantTypes = [TransactionType.SWIPE_PAY, TransactionType.PAY_SWIPE, TransactionType.MONEY_TRANSFER];
+    const transferByInflow = buildTransferExpensePerInflowId(filteredTransactions);
     let data = filteredTransactions
-      .filter(t => relevantTypes.includes(t.type) && (t.metadata?.customerId || t.metadata?.walletId))
+      .filter(t => isSwipePayInflow(t))
       .map(t => {
+        const econ = parseSwipeInflowEconomics(t)!;
         const customer = customers.find(c => c.id === t.metadata?.customerId);
         const wallet = wallets.find(w => w.id === t.metadata?.walletId);
-        const { income, expense, profit } = calculatePL([t]);
-        const { amountSwiped, amountLoaded, amountTransferred } = extractAmountsFromEntries(t);
-        const portal = wallet?.pgs?.[0]?.name || '—';
-        return { 
+        const cardRaw = (t.metadata?.cardType || 'visa').toUpperCase();
+        const cardLabel = cardRaw === 'MASTERCARD' ? 'MASTER' : cardRaw;
+        const appPctDisplay = inferPgName(wallet, t.metadata?.cardType, econ.appPct);
+        const performer = t.metadata?.performedByUserId;
+        const lead =
+          performer && user?.id === performer ? user?.name ?? '—'
+          : performer ? performer.slice(0, 8) + '…'
+          : '—';
+        const transferExpense = transferByInflow.get(t.id) ?? 0;
+        const netProfit = econ.grossProfit - transferExpense;
+        return {
           id: t.id,
-          type: t.type,
-          typeLabel: getTypeLabel(t.type),
+          raw: t,
           date: t.date,
           customerId: t.metadata?.customerId,
           customer: customer?.name || 'Unknown',
           walletId: t.metadata?.walletId,
-          wallet: wallet?.name || 'N/A',
-          portal,
-          card: t.metadata?.cardType?.toUpperCase() || '—',
-          amountSwiped,
-          amountLoaded,
-          amountTransferred,
-          revenue: income,
-          cost: expense,
-          profit
+          bankName: wallet?.name ?? '—',
+          card: cardLabel,
+          appName: appPctDisplay,
+          lead,
+          actualAmount: econ.actualAmount,
+          grossAmount: econ.grossAmount,
+          shopPct: econ.shopPct,
+          customerPct: econ.customerPct,
+          appPct: econ.appPct,
+          appCharges: econ.appCharges,
+          shopCharges: econ.shopCharges,
+          customerCharges: econ.shopCharges,
+          netAmount: econ.netAmount,
+          grossProfit: econ.grossProfit,
+          transferExpense,
+          netProfit,
+          commission: 0,
+          remarks: t.description.length > 48 ? `${t.description.slice(0, 48)}…` : t.description,
         };
       });
     if (txnCustomerFilter !== 'all') {
@@ -193,13 +190,13 @@ export const Reports: React.FC = () => {
     }
     data = [...data].sort((a, b) => {
       if (txnSortBy === 'date') return new Date(b.date).getTime() - new Date(a.date).getTime();
-      if (txnSortBy === 'profit') return b.profit - a.profit;
-      if (txnSortBy === 'revenue') return b.revenue - a.revenue;
-      if (txnSortBy === 'cost') return b.cost - a.cost;
+      if (txnSortBy === 'profit') return b.netProfit - a.netProfit;
+      if (txnSortBy === 'revenue') return b.actualAmount - a.actualAmount;
+      if (txnSortBy === 'cost') return b.appCharges - a.appCharges;
       return 0;
     });
     return data;
-  }, [filteredTransactions, customers, wallets, txnCustomerFilter, txnWalletFilter, txnSortBy]);
+  }, [filteredTransactions, customers, wallets, user?.id, user?.name, txnCustomerFilter, txnWalletFilter, txnSortBy]);
 
   const totalPL = calculatePL(filteredTransactions);
 
@@ -245,18 +242,35 @@ export const Reports: React.FC = () => {
   };
 
   const exportTxnPL = () => {
-    const headers = ['Date', 'Customer Name', 'Type', 'Card', 'Wallet', 'Portal', 'Amount Swiped', 'Amount Loaded', 'Amount Transferred', 'Profit Earned'];
-    const rows = txnPL.map(r => [
+    const headers = [
+      '#', 'Date', 'Lead', 'Bank', 'Card #', 'Card type', 'App (portal)',
+      'Actual amount', 'Gross amount', 'Shop %', 'Customer %', 'App %',
+      'App charges', 'Shop charges', 'Customer charges', 'Net amount',
+      'Gross profit', 'Transfer expense', 'Net profit', 'Customer (ref)', 'Commission', 'Remarks',
+    ];
+    const rows = txnPL.map((r, i) => [
+      String(i + 1),
       new Date(r.date).toLocaleDateString(),
-      r.customer,
-      r.typeLabel,
+      r.lead,
+      r.bankName,
+      '—',
       r.card,
-      r.wallet,
-      r.portal,
-      formatCurrency(r.amountSwiped),
-      formatCurrency(r.amountLoaded),
-      formatCurrency(r.amountTransferred),
-      formatCurrency(r.profit),
+      r.appName,
+      formatCurrency(r.actualAmount),
+      formatCurrency(r.grossAmount),
+      formatPct(r.shopPct),
+      formatPct(r.customerPct),
+      formatPct(r.appPct),
+      formatCurrency(r.appCharges),
+      formatCurrency(r.shopCharges),
+      formatCurrency(r.customerCharges),
+      formatCurrency(r.netAmount),
+      formatCurrency(r.grossProfit),
+      formatCurrency(r.transferExpense),
+      formatCurrency(r.netProfit),
+      r.customer,
+      formatCurrency(r.commission),
+      r.remarks,
     ]);
     exportToCSV('transaction-pl', headers, rows);
   };
@@ -520,9 +534,9 @@ export const Reports: React.FC = () => {
                     className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 min-w-[160px]"
                   >
                     <option value="date">Date (newest first)</option>
-                    <option value="profit">Net Profit (high to low)</option>
-                    <option value="revenue">Revenue (high to low)</option>
-                    <option value="cost">Cost (high to low)</option>
+                    <option value="profit">Net profit (high to low)</option>
+                    <option value="revenue">Actual amount (high to low)</option>
+                    <option value="cost">App / portal charges (high to low)</option>
                   </select>
                 </div>
                 {(txnCustomerFilter !== 'all' || txnWalletFilter !== 'all') && (
@@ -537,22 +551,41 @@ export const Reports: React.FC = () => {
               </div>
             </FilterSection>
             <Card>
-            <CardHeader title="Individual Transaction Profitability" subtitle="Real-time margin analysis per swipe" action={<Button size="sm" variant="outline" onClick={exportTxnPL}><Download size={14} /> Export CSV</Button>} />
+            <CardHeader
+              title="Transaction P&L (swipe inflow)"
+              subtitle="Workbook-style math: gross = actual − app charges; gross profit = shop − app charges; net profit = gross profit − transfer expense. Payout (same customer & calendar day) is split evenly across inflows in the filtered range."
+              action={<Button size="sm" variant="outline" onClick={exportTxnPL}><Download size={14} /> Export CSV</Button>}
+            />
+            <p className="px-6 -mt-2 mb-2 text-xs text-slate-500">
+              <strong>Swipe Pay inflow</strong> rows only (card numbers are not stored). Customer name stays in filters/search via Data Filters above.
+            </p>
             <DataTable 
-              headers={['Date', 'Customer Name', 'Type', 'Card', 'Wallet', 'Portal', 'Amount Swiped', 'Amount Loaded', 'Amount Transferred', 'Profit Earned']}
-              rows={txnPL.map(t => [
+              minTableWidth={1680}
+              headers={['#', 'Date', 'Lead', 'Bank', 'Card #', 'Card', 'App', 'Actual', 'Gross', 'Shop %', 'Cust %', 'App %', 'App chg', 'Shop chg', 'Cust chg', 'Net amt', 'Gr profit', 'Xfer exp', 'Net profit', 'Comm', 'Remarks']}
+              rows={txnPL.map((t, idx) => [
+                idx + 1,
                 new Date(t.date).toLocaleDateString(),
-                t.customer,
-                t.typeLabel,
+                t.lead,
+                <span className="font-medium text-slate-800 whitespace-nowrap">{t.bankName}</span>,
+                '—',
                 t.card,
-                t.wallet,
-                t.portal,
-                formatCurrency(t.amountSwiped),
-                formatCurrency(t.amountLoaded),
-                formatCurrency(t.amountTransferred),
-                <span className={`font-bold ${t.profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(t.profit)}</span>
+                <span className="whitespace-nowrap">{t.appName}</span>,
+                formatCurrency(t.actualAmount),
+                formatCurrency(t.grossAmount),
+                formatPct(t.shopPct),
+                formatPct(t.customerPct),
+                formatPct(t.appPct),
+                formatCurrency(t.appCharges),
+                formatCurrency(t.shopCharges),
+                formatCurrency(t.customerCharges),
+                formatCurrency(t.netAmount),
+                formatCurrency(t.grossProfit),
+                formatCurrency(t.transferExpense),
+                <span className={`font-bold ${t.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(t.netProfit)}</span>,
+                formatCurrency(t.commission),
+                <span className="max-w-[10rem] truncate block text-xs text-slate-600" title={t.raw.description}>{t.remarks}</span>,
               ])}
-              rightAlignColumns={[6, 7, 8, 9]}
+              rightAlignColumns={[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]}
             />
           </Card>
           </>
@@ -588,6 +621,24 @@ export const Reports: React.FC = () => {
             />
           </Card>
         )}
+
+        {activeTab === 'customer' && (
+          <Card>
+            <CardHeader
+              title="Top 10 profitable customers"
+              subtitle="Swipe Pay volume count and net profit for the current filters (date range, search, card network)"
+            />
+            <DataTable
+              headers={['Customer', 'Swipe Pay count', 'Net profit']}
+              rows={customerStats.map(s => [
+                <span className="font-bold">{s.name}</span>,
+                s.count,
+                <span className={`font-bold ${s.profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(s.profit)}</span>,
+              ])}
+              rightAlignColumns={[1, 2]}
+            />
+          </Card>
+        )}
       </div>
     </Layout>
   );
@@ -615,9 +666,9 @@ const KPICard = ({ title, value, icon, color, bg, gradient }: any) => (
   </div>
 );
 
-const DataTable = ({ headers, rows, rightAlignColumns = [] }: { headers: string[], rows: any[][], rightAlignColumns?: number[] }) => (
+const DataTable = ({ headers, rows, rightAlignColumns = [], minTableWidth }: { headers: string[], rows: any[][], rightAlignColumns?: number[], minTableWidth?: number }) => (
   <div className="overflow-x-auto rounded-xl border border-slate-100 overflow-hidden">
-    <table className="w-full text-sm">
+    <table className="w-full text-sm" style={minTableWidth ? { minWidth: minTableWidth } : undefined}>
       <thead className="bg-slate-50 border-b border-slate-200">
         <tr>
           {headers.map((h, i) => (
