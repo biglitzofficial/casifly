@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo, useCallback } from 'react';
 import { 
   Account, AccountType, Customer, Wallet, Transaction, LedgerEntry, TransactionType,
-  CreateCustomerDTO, CreateWalletDTO, PGConfig, TransactionMetadata
+  CreateCustomerDTO, CreateWalletDTO, PGConfig, TransactionMetadata,
+  BalanceSheet, ProfitAndLoss,
 } from '../types';
 import { INITIAL_ACCOUNTS, INITIAL_CUSTOMERS, INITIAL_WALLETS } from '../constants';
 import { formatCurrency, generateId } from '../lib/utils';
@@ -33,8 +34,10 @@ interface ERPContextType {
 
   // Getters
   getAccountBalance: (accountId: string) => number;
-  /** Balance as of end of given date (ISO string). Uses only transactions with date <= asOfDateIso. */
+  /** Balance as of end of given instant (ISO). Uses only COMPLETED transactions with date <= asOfDateIso. */
   getAccountBalanceAsOf: (accountId: string, asOfDateIso: string) => number;
+  /** Ledger balances after all COMPLETED transactions on or before end of `dayStr` (YYYY-MM-DD, local). */
+  getAccountBalancesAsOf: (dayStr: string) => Record<string, number>;
   getLedger: (accountId: string) => Transaction[];
   generateBalanceSheet: () => BalanceSheet;
   generateProfitAndLoss: () => ProfitAndLoss;
@@ -52,6 +55,13 @@ interface ERPContextType {
 
 const ERPContext = createContext<ERPContextType | undefined>(undefined);
 const ERP_STORAGE_KEY = 'casifly_erp_data';
+
+/** Local calendar end-of-day for YYYY-MM-DD (matches Reports date-range filtering). */
+function endOfLocalDayFromYmd(dayStr: string): Date | null {
+  if (!dayStr || !/^\d{4}-\d{2}-\d{2}$/.test(dayStr)) return null;
+  const [y, m, d] = dayStr.split('-').map(Number);
+  return new Date(y, m - 1, d, 23, 59, 59, 999);
+}
 
 const loadERPFromStorage = () => {
   try {
@@ -379,10 +389,13 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const getAccountBalance = (accountId: string) => accountBalances[accountId] || 0;
 
   const getAccountBalanceAsOf = useCallback((accountId: string, asOfDateIso: string) => {
+    const cutoff = new Date(asOfDateIso);
+    if (Number.isNaN(cutoff.getTime())) return 0;
     let txnsToUse = productId
-      ? transactions.filter(t => t.status === 'COMPLETED' && (t.metadata?.storeId ?? '') === productId)
-      : transactions.filter(t => t.status === 'COMPLETED');
-    txnsToUse = txnsToUse.filter(t => t.date <= asOfDateIso);
+      ? transactions.filter(
+          t => t.status === 'COMPLETED' && (t.metadata?.storeId ?? '') === productId && new Date(t.date) <= cutoff
+        )
+      : transactions.filter(t => t.status === 'COMPLETED' && new Date(t.date) <= cutoff);
     const acc = accounts.find(a => a.id === accountId);
     if (!acc) return 0;
     let balance = productId ? 0 : (acc.balance || 0);
@@ -399,6 +412,38 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       });
     });
     return balance;
+  }, [transactions, accounts, productId]);
+
+  const getAccountBalancesAsOf = useCallback((dayStr: string): Record<string, number> => {
+    const cutoff = endOfLocalDayFromYmd(dayStr);
+    if (!cutoff) return {};
+    const balances: Record<string, number> = {};
+    const txnsToUse = productId
+      ? transactions.filter(
+          t =>
+            t.status === 'COMPLETED' &&
+            (t.metadata?.storeId ?? '') === productId &&
+            new Date(t.date) <= cutoff
+        )
+      : transactions.filter(t => t.status === 'COMPLETED' && new Date(t.date) <= cutoff);
+
+    accounts.forEach(acc => {
+      balances[acc.id] = productId ? 0 : (acc.balance || 0);
+    });
+
+    txnsToUse.forEach(txn => {
+      txn.entries.forEach(entry => {
+        const acc = accounts.find(a => a.id === entry.accountId);
+        if (!acc) return;
+
+        if (acc.type === AccountType.ASSET || acc.type === AccountType.EXPENSE) {
+          balances[entry.accountId] = (balances[entry.accountId] || 0) + (entry.debit - entry.credit);
+        } else {
+          balances[entry.accountId] = (balances[entry.accountId] || 0) + (entry.credit - entry.debit);
+        }
+      });
+    });
+    return balances;
   }, [transactions, accounts, productId]);
 
   const getLedger = (accountId: string) => transactionsForUser.filter(txn => txn.entries.some(e => e.accountId === accountId));
@@ -501,6 +546,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       deleteTransaction,
       getAccountBalance,
       getAccountBalanceAsOf,
+      getAccountBalancesAsOf,
       getLedger,
       formatCurrency,
       reconcileWallet,

@@ -11,6 +11,10 @@ import { Button } from '../components/ui/Elements';
 
 type ReportTab = 'overview' | 'balance-sheet' | 'pl' | 'transactions' | 'card' | 'wallet' | 'customer';
 
+function localYmd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 const CARD_NETWORK_OPTIONS = [
   { value: 'all', label: 'All Networks' },
   { value: 'visa', label: 'Visa' },
@@ -27,7 +31,7 @@ const getTypeLabel = (type: TransactionType) => {
 };
 
 export const Reports: React.FC = () => {
-  const { transactions, wallets, customers, formatCurrency, generateBalanceSheet, generateProfitAndLoss, getAccountBalance, getAccountBalanceAsOf } = useERP();
+  const { transactions, wallets, customers, formatCurrency, generateBalanceSheet, generateProfitAndLoss, getAccountBalancesAsOf } = useERP();
   const [activeTab, setActiveTab] = useState<ReportTab>('overview');
   const [search, setSearch] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>({ from: '', to: '', preset: 'allTime' });
@@ -35,6 +39,17 @@ export const Reports: React.FC = () => {
   const [txnCustomerFilter, setTxnCustomerFilter] = useState('all');
   const [txnWalletFilter, setTxnWalletFilter] = useState('all');
   const [txnSortBy, setTxnSortBy] = useState<'date' | 'profit' | 'revenue' | 'cost'>('date');
+
+  const [bsCompareDayA, setBsCompareDayA] = useState(() => {
+    const t = new Date();
+    const day = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+    day.setDate(day.getDate() - 1);
+    return localYmd(day);
+  });
+  const [bsCompareDayB, setBsCompareDayB] = useState(() => {
+    const t = new Date();
+    return localYmd(new Date(t.getFullYear(), t.getMonth(), t.getDate()));
+  });
 
   const filteredTransactions = useMemo(() => {
     let result = transactions;
@@ -67,22 +82,21 @@ export const Reports: React.FC = () => {
   const balanceSheet = generateBalanceSheet();
   const plReport = generateProfitAndLoss();
 
-  // End of yesterday (for wallet balance movement)
-  const endOfYesterdayIso = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    d.setHours(23, 59, 59, 999);
-    return d.toISOString();
-  }, []);
+  const walletBalanceCompare = useMemo(() => {
+    const balA = getAccountBalancesAsOf(bsCompareDayA);
+    const balB = getAccountBalancesAsOf(bsCompareDayB);
+    return wallets.map(w => {
+      const balanceA = balA[w.ledgerAccountId] ?? 0;
+      const balanceB = balB[w.ledgerAccountId] ?? 0;
+      return { id: w.id, name: w.name, balanceA, balanceB, delta: balanceB - balanceA };
+    });
+  }, [wallets, getAccountBalancesAsOf, bsCompareDayA, bsCompareDayB]);
 
-  const walletBalanceMovement = useMemo(() =>
-    wallets.map(w => {
-      const yesterday = getAccountBalanceAsOf(w.ledgerAccountId, endOfYesterdayIso);
-      const today = getAccountBalance(w.ledgerAccountId);
-      return { wallet: w, yesterday, today, difference: today - yesterday };
-    }),
-    [wallets, getAccountBalanceAsOf, getAccountBalance, endOfYesterdayIso]
-  );
+  const walletCompareTotals = useMemo(() => {
+    const balanceA = walletBalanceCompare.reduce((s, r) => s + r.balanceA, 0);
+    const balanceB = walletBalanceCompare.reduce((s, r) => s + r.balanceB, 0);
+    return { balanceA, balanceB, delta: balanceB - balanceA };
+  }, [walletBalanceCompare]);
 
   // --- Aggregation Logic (uses filtered transactions) ---
   const calculatePL = (txns: Transaction[]) => {
@@ -212,6 +226,22 @@ export const Reports: React.FC = () => {
       ['Total', 'Liabilities + Equity', formatCurrency(balanceSheet.totalLiabilities + balanceSheet.totalEquity)],
     ];
     exportToCSV('balance-sheet', ['Type', 'Account', 'Balance'], rows);
+  };
+
+  const exportWalletBalanceCompare = () => {
+    const rows = walletBalanceCompare.map(w => [
+      w.name,
+      formatCurrency(w.balanceA),
+      formatCurrency(w.balanceB),
+      formatCurrency(w.delta),
+    ]);
+    rows.push([
+      'All wallets',
+      formatCurrency(walletCompareTotals.balanceA),
+      formatCurrency(walletCompareTotals.balanceB),
+      formatCurrency(walletCompareTotals.delta),
+    ]);
+    exportToCSV('wallet-balance-compare', ['Wallet', `End ${bsCompareDayA}`, `End ${bsCompareDayB}`, 'Change'], rows);
   };
 
   const exportTxnPL = () => {
@@ -361,18 +391,54 @@ export const Reports: React.FC = () => {
             </Card>
 
             <Card>
-              <CardHeader title="Wallet Balance Movement" subtitle="Yesterday vs today — inflows add to wallet, outflows reduce" />
-              <div className="p-6">
+              <CardHeader
+                title="Wallet balances — two-day comparison"
+                subtitle="Each column is the ledger balance at the end of that day (completed transactions only), using the same rules as the main balance sheet."
+                action={
+                  <Button size="sm" variant="outline" onClick={exportWalletBalanceCompare}>
+                    <Download size={14} /> Export CSV
+                  </Button>
+                }
+              />
+              <div className="p-6 space-y-6">
+                <div className="flex flex-wrap gap-6 items-end">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">First day</label>
+                    <input
+                      type="date"
+                      value={bsCompareDayA}
+                      onChange={e => setBsCompareDayA(e.target.value)}
+                      className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Second day</label>
+                    <input
+                      type="date"
+                      value={bsCompareDayB}
+                      onChange={e => setBsCompareDayB(e.target.value)}
+                      className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
                 <DataTable
-                  headers={['Wallet', 'Yesterday Balance', 'Today Balance', 'Difference']}
-                  rows={walletBalanceMovement.map(({ wallet, yesterday, today, difference }) => [
-                    <span className="font-semibold">{wallet.name}</span>,
-                    formatCurrency(yesterday),
-                    formatCurrency(today),
-                    <span className={`font-bold tabular-nums ${difference >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {difference >= 0 ? '+' : ''}{formatCurrency(difference)}
-                    </span>
-                  ])}
+                  headers={['Wallet', `End ${bsCompareDayA}`, `End ${bsCompareDayB}`, 'Change']}
+                  rows={[
+                    ...walletBalanceCompare.map(w => [
+                      w.name,
+                      formatCurrency(w.balanceA),
+                      formatCurrency(w.balanceB),
+                      <span className={`font-bold ${w.delta >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(w.delta)}</span>,
+                    ]),
+                    [
+                      <span className="font-bold text-slate-900">All wallets</span>,
+                      <span className="font-bold tabular-nums">{formatCurrency(walletCompareTotals.balanceA)}</span>,
+                      <span className="font-bold tabular-nums">{formatCurrency(walletCompareTotals.balanceB)}</span>,
+                      <span className={`font-bold tabular-nums ${walletCompareTotals.delta >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {formatCurrency(walletCompareTotals.delta)}
+                      </span>,
+                    ],
+                  ]}
                   rightAlignColumns={[1, 2, 3]}
                 />
               </div>

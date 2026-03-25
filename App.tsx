@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Menu } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
@@ -24,7 +24,13 @@ import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 
 const views = ['dashboard','profile','staff','staff-analytics','swipe-pay','pay-swipe','money-transfer','crm','ledgers','reports','masters'];
+const landingHashes = ['home', 'store-login', 'distributor-login'] as const;
 const VIEW_STORAGE_KEY = 'casifly_view';
+
+const getHashUrl = (view: string) => {
+  const base = window.location.pathname + window.location.search;
+  return `${base}${base.endsWith('#') ? '' : '#'}${view}`;
+};
 
 const getInitialView = () => {
   try {
@@ -36,41 +42,87 @@ const getInitialView = () => {
   return 'dashboard';
 };
 
-const getHashUrl = (view: string) => {
-  const base = window.location.pathname + window.location.search;
-  return `${base}${base.endsWith('#') ? '' : '#'}${view}`;
+const getInitialLandingView = (): 'home' | 'store-login' | 'distributor-login' => {
+  try {
+    const hash = window.location.hash.slice(1);
+    if (hash === 'store-login') return 'store-login';
+    if (hash === 'distributor-login') return 'distributor-login';
+  } catch (_) {}
+  return 'home';
 };
 
 const AppContent: React.FC = () => {
   const { user, authLoading } = useAuth();
-  const [landingView, setLandingView] = useState<'home' | 'store-login' | 'distributor-login'>('home');
+  const [landingView, setLandingViewState] = useState<'home' | 'store-login' | 'distributor-login'>(getInitialLandingView);
   const [currentView, setViewState] = useState(getInitialView);
+
+  const setLandingView = React.useCallback((view: 'home' | 'store-login' | 'distributor-login') => {
+    setLandingViewState(view);
+    try { window.history.pushState({ casifly: view }, '', getHashUrl(view)); } catch (_) {}
+  }, []);
+
   const setView = React.useCallback((view: string) => {
     if (!views.includes(view)) return;
     setViewState(view);
     try { localStorage.setItem(VIEW_STORAGE_KEY, view); } catch (_) {}
-    try { window.history.pushState(null, '', getHashUrl(view)); } catch (_) {}
+    try { window.history.pushState({ casifly: view }, '', getHashUrl(view)); } catch (_) {}
   }, []);
 
+  // Handle browser Back/Forward - use state when available, fallback to hash
   useEffect(() => {
-    const syncFromHash = () => {
+    const syncFromHistory = (e?: PopStateEvent) => {
+      const state = e?.state as { casifly?: string } | null;
       const hash = window.location.hash.slice(1);
-      const view = (hash && views.includes(hash)) ? hash : 'dashboard';
-      setViewState(view);
-      try { localStorage.setItem(VIEW_STORAGE_KEY, view); } catch (_) {}
-    };
-    window.addEventListener('popstate', syncFromHash);
-    return () => window.removeEventListener('popstate', syncFromHash);
-  }, []);
+      const fromState = state?.casifly && (views.includes(state.casifly) || landingHashes.includes(state.casifly as any));
+      const viewOrLanding = fromState ? state!.casifly! : hash;
 
-  // Sync URL on mount so Back has a valid target (Dashboard -> Ledgers -> Back -> Dashboard)
+      if (user) {
+        if (viewOrLanding && views.includes(viewOrLanding)) {
+          setViewState(viewOrLanding);
+          try { localStorage.setItem(VIEW_STORAGE_KEY, viewOrLanding); } catch (_) {}
+        } else if (viewOrLanding && landingHashes.includes(viewOrLanding as any)) {
+          setViewState('dashboard');
+          try { localStorage.setItem(VIEW_STORAGE_KEY, 'dashboard'); } catch (_) {}
+          try { window.history.replaceState({ casifly: 'dashboard' }, '', getHashUrl('dashboard')); } catch (_) {}
+        } else {
+          setViewState('dashboard');
+          try { localStorage.setItem(VIEW_STORAGE_KEY, 'dashboard'); } catch (_) {}
+        }
+      } else {
+        if (viewOrLanding === 'store-login') setLandingViewState('store-login');
+        else if (viewOrLanding === 'distributor-login') setLandingViewState('distributor-login');
+        else setLandingViewState('home');
+      }
+    };
+    const handler = (e: PopStateEvent) => syncFromHistory(e);
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, [user]);
+
+  // Sync URL when showing main app (establish history entry so Back stays in-app)
+  const hasMainAppSynced = useRef(false);
   useEffect(() => {
     if (!user || user.role === 'master_admin') return;
+    if (hasMainAppSynced.current) return;
+    const raf = requestAnimationFrame(() => {
+      const cur = window.location.hash.slice(1);
+      if (!views.includes(cur)) {
+        try { window.history.replaceState({ casifly: currentView }, '', getHashUrl(currentView)); } catch (_) {}
+      }
+      hasMainAppSynced.current = true;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [user?.role, user]);
+
+  // Sync URL when showing pre-login (Home, Store Login, Distributor Login)
+  useEffect(() => {
+    if (user) return;
     const cur = window.location.hash.slice(1);
-    if (!cur || !views.includes(cur)) {
-      try { window.history.replaceState(null, '', getHashUrl(currentView)); } catch (_) {}
+    const expected = landingView === 'store-login' ? 'store-login' : landingView === 'distributor-login' ? 'distributor-login' : 'home';
+    if (cur !== expected) {
+      try { window.history.replaceState({ casifly: expected }, '', getHashUrl(expected)); } catch (_) {}
     }
-  }, [user?.role]);
+  }, [user, landingView]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
@@ -108,8 +160,8 @@ const AppContent: React.FC = () => {
     );
   }
   if (!user) {
-    if (landingView === 'store-login') return <StoreLogin onBackToHome={() => setLandingView('home')} />;
-    if (landingView === 'distributor-login') return <DistributorLogin onBackToHome={() => setLandingView('home')} />;
+    if (landingView === 'store-login')     return <StoreLogin onBackToHome={() => window.history.back()} />;
+    if (landingView === 'distributor-login') return <DistributorLogin onBackToHome={() => window.history.back()} />;
     return <Home onNavigateToLogin={(type) => setLandingView(type === 'store' ? 'store-login' : 'distributor-login')} />;
   }
   if (user.role === 'master_admin') return <ERPProvider><MasterAdmin /></ERPProvider>;
