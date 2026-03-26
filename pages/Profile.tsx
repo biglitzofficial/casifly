@@ -8,8 +8,9 @@ import { Save, Trash2, AlertTriangle } from 'lucide-react';
 
 export const Profile: React.FC = () => {
   const { user, getCurrentProductUser, updateCurrentUserProfile, products } = useAuth();
-  const { clearAllData } = useERP();
+  const { clearWalletData, clearAllData } = useERP();
   const { confirm } = useConfirm();
+  const [walletResetLoading, setWalletResetLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -127,40 +128,84 @@ export const Profile: React.FC = () => {
         </Card>
 
         {/* Development: Delete All Data (for development only) */}
-        <Card className="mt-8 border-rose-200">
+        <Card className="mt-8 border-amber-200">
           <CardHeader
             title="Development"
-            subtitle="Reset all ERP data to initial state (for development only)"
+            subtitle="Dangerous resets for local testing only — use separate options for wallets vs full ERP."
           />
           <CardContent>
-            <div className="p-6 bg-rose-50/50 rounded-2xl border border-rose-200 space-y-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-semibold text-rose-800">Delete All Data</p>
-                  <p className="text-xs text-rose-700 mt-1">This will permanently delete all transactions, customers, and reset accounts/wallets to initial state. Use only for development.</p>
+            <div className="space-y-6">
+              <div className="p-6 bg-amber-50/50 rounded-2xl border border-amber-200 space-y-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-900">Reset wallets only</p>
+                    <p className="text-xs text-amber-800 mt-1">
+                      Clears <strong>all transactions</strong>, removes extra wallet rows you added, and restores the two seed wallets (Wallet A / B) with default PGs. Keeps customers and the rest of the chart of accounts (cash, bank, equity). Zeros wallet and activity-related balances (income, expense, customer payables from ledger).
+                    </p>
+                  </div>
                 </div>
+                <Button
+                  variant="outline"
+                  className="border-amber-400 text-amber-900 hover:bg-amber-100"
+                  loading={walletResetLoading}
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: 'Reset wallets?',
+                      message: 'All transactions will be deleted and wallets reset to seed. Customers are kept. This cannot be undone.',
+                      confirmText: 'Reset wallets',
+                      variant: 'danger',
+                    });
+                    if (ok) {
+                      setWalletResetLoading(true);
+                      try {
+                        await clearWalletData();
+                      } finally {
+                        setWalletResetLoading(false);
+                      }
+                    }
+                  }}
+                >
+                  <Trash2 size={18} />
+                  Reset wallets (transactions + seed wallets)
+                </Button>
               </div>
-              <Button
-                variant="outline"
-                className="border-rose-300 text-rose-700 hover:bg-rose-100"
-                loading={deleteLoading}
-                onClick={async () => {
-                  const ok = await confirm({
-                    title: 'Delete All Data?',
-                    message: 'This will permanently clear all ERP data and reset to initial state. This cannot be undone.',
-                    confirmText: 'Delete All',
-                    variant: 'danger',
-                  });
-                  if (ok) {
-                    setDeleteLoading(true);
-                    try { await clearAllData(); } finally { setDeleteLoading(false); }
-                  }
-                }}
-              >
-                <Trash2 size={18} />
-                Delete All Data
-              </Button>
+
+              <div className="p-6 bg-rose-50/50 rounded-2xl border border-rose-200 space-y-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-rose-800">Reset all ERP data</p>
+                    <p className="text-xs text-rose-700 mt-1">
+                      Full factory reset: deletes all transactions and customers, restores seed accounts and wallets only (same as a fresh install).
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  className="border-rose-300 text-rose-700 hover:bg-rose-100"
+                  loading={deleteLoading}
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: 'Delete all ERP data?',
+                      message: 'This will permanently clear all ERP data (transactions, customers, custom accounts) and reset to initial seed state. This cannot be undone.',
+                      confirmText: 'Delete all data',
+                      variant: 'danger',
+                    });
+                    if (ok) {
+                      setDeleteLoading(true);
+                      try {
+                        await clearAllData();
+                      } finally {
+                        setDeleteLoading(false);
+                      }
+                    }
+                  }}
+                >
+                  <Trash2 size={18} />
+                  Reset all ERP data (full seed)
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

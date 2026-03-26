@@ -333,4 +333,59 @@ export const firestoreDb = {
     await batch.commit();
     return { ok: true };
   },
+
+  async resetWalletData() {
+    const f = fs();
+    const INITIAL_WALLETS = [
+      { id: 'W001', name: 'Wallet A (Razorpay)', ledger_account_id: 'A004', pgs: JSON.stringify([{ name: 'Standard', charges: { visa: 1.2, master: 1.2, amex: 2.5, rupay: 0.5 } }, { name: 'Premium', charges: { visa: 1.5, master: 1.5, amex: 2.8, rupay: 0.8 } }]), store_id: null },
+      { id: 'W002', name: 'Wallet B (Paytm)', ledger_account_id: 'A005', pgs: JSON.stringify([{ name: 'Business', charges: { visa: 1.1, master: 1.1, amex: 2.4, rupay: 0.0 } }]), store_id: null },
+    ];
+    const BATCH_LIMIT = 500;
+    const batchDelete = async (coll: string) => {
+      const snap = await f.collection(coll).get();
+      for (let i = 0; i < snap.docs.length; i += BATCH_LIMIT) {
+        const chunk = snap.docs.slice(i, i + BATCH_LIMIT);
+        if (chunk.length === 0) continue;
+        const b = f.batch();
+        chunk.forEach((d) => b.delete(d.ref));
+        await b.commit();
+      }
+    };
+    await batchDelete(C.transactions);
+    await batchDelete(C.wallets);
+    let batch = f.batch();
+    for (const w of INITIAL_WALLETS) {
+      batch.set(f.collection(C.wallets).doc(w.id), w);
+    }
+    await batch.commit();
+
+    const accSnap = await f.collection(C.accounts).get();
+    for (let i = 0; i < accSnap.docs.length; i += BATCH_LIMIT) {
+      const chunk = accSnap.docs.slice(i, i + BATCH_LIMIT);
+      const b = f.batch();
+      chunk.forEach((d: any) => {
+        const data = d.data();
+        if (data.category === 'Wallet' && d.id !== 'A004' && d.id !== 'A005') {
+          b.delete(d.ref);
+        }
+      });
+      await b.commit();
+    }
+
+    const zeroIds = new Set(['A004', 'A005', 'A006', 'I001', 'I002', 'E001', 'E002', 'E003', 'L001']);
+    batch = f.batch();
+    zeroIds.forEach((id) => {
+      batch.update(f.collection(C.accounts).doc(id), { balance: 0 });
+    });
+    accSnap.docs.forEach((d: any) => {
+      const data = d.data();
+      if (data.type === 'LIABILITY' && data.category === 'Customer' && !zeroIds.has(d.id)) {
+        batch.update(d.ref, { balance: 0 });
+      }
+    });
+    batch.update(f.collection(C.accounts).doc('A004'), { name: 'Wallet A (Razorpay)', balance: 0 });
+    batch.update(f.collection(C.accounts).doc('A005'), { name: 'Wallet B (Paytm)', balance: 0 });
+    await batch.commit();
+    return { ok: true };
+  },
 };

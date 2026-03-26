@@ -143,6 +143,10 @@ export const api = {
     return fetchApi<{ ok: boolean }>('/erp/reset', { method: 'POST' });
   },
 
+  async resetWalletData() {
+    return fetchApi<{ ok: boolean }>('/erp/reset-wallets', { method: 'POST' });
+  },
+
   async getAccountBalance(accountId: string) {
     const data = await fetchApi<{ balance: number }>(`/erp/balance/${accountId}`);
     return data.balance;

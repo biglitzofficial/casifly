@@ -277,6 +277,17 @@ erpRouter.post('/reset', async (req, res) => {
   }
 });
 
+/** Dev: clear transactions + reset wallets to seed; keeps customers and chart (except activity balances). */
+erpRouter.post('/reset-wallets', async (req, res) => {
+  try {
+    await db.resetWalletData();
+    res.json({ ok: true });
+  } catch (e: any) {
+    console.error('resetWalletData failed:', e);
+    res.status(500).json({ error: e?.message || 'Wallet reset failed' });
+  }
+});
+
 // Staff targets (store admin only)
 erpRouter.get('/staff-targets', async (req, res) => {
   const user = (req as any).user;

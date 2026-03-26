@@ -50,6 +50,7 @@ interface ERPContextType {
   restoreBackup: (json: string) => { success: boolean; error?: string };
 
   // Development
+  clearWalletData: () => Promise<void>;
   clearAllData: () => Promise<void>;
 }
 
@@ -486,6 +487,40 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return { assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity };
   };
 
+  const clearWalletData = async () => {
+    if (USE_API) {
+      try {
+        await api.resetWalletData();
+        await refreshFromApi();
+        toast.success('Wallet reset: transactions cleared; wallets restored to seed.');
+      } catch (e: any) {
+        toast.error(e?.message || 'Wallet reset failed');
+      }
+      return;
+    }
+    const seedWalletLedgerIds = new Set(INITIAL_WALLETS.map(w => w.ledgerAccountId));
+    const seedById = new Map(INITIAL_ACCOUNTS.map(a => [a.id, a]));
+    setTransactions([]);
+    setWallets(INITIAL_WALLETS);
+    setAccounts(prev => {
+      const withoutExtraWallets = prev.filter(a => a.category !== 'Wallet' || seedWalletLedgerIds.has(a.id));
+      return withoutExtraWallets.map(a => {
+        if (a.category === 'Wallet' && seedWalletLedgerIds.has(a.id)) {
+          const s = seedById.get(a.id);
+          return s ? { ...s } : { ...a, balance: 0 };
+        }
+        if (['I001', 'I002', 'E001', 'E002', 'E003', 'L001', 'A006'].includes(a.id)) {
+          return { ...a, balance: 0 };
+        }
+        if (a.type === AccountType.LIABILITY && a.category === 'Customer') {
+          return { ...a, balance: 0 };
+        }
+        return a;
+      });
+    });
+    toast.success('Wallet reset: transactions cleared; wallets restored to seed.');
+  };
+
   const clearAllData = async () => {
     if (USE_API) {
       try {
@@ -556,6 +591,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       generateProfitAndLoss,
       exportBackup,
       restoreBackup,
+      clearWalletData,
       clearAllData
     }}>
       {children}
