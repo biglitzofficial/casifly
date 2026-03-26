@@ -5,7 +5,7 @@ import {
   BalanceSheet, ProfitAndLoss,
 } from '../types';
 import { INITIAL_ACCOUNTS, INITIAL_CUSTOMERS, INITIAL_WALLETS } from '../constants';
-import { formatCurrency, generateId } from '../lib/utils';
+import { formatCurrency, generateId, txnOnOrBeforeLocalDay } from '../lib/utils';
 import { useToast } from './ToastContext';
 import { useAuth } from './AuthContext';
 import { api, USE_API } from '../lib/api';
@@ -55,13 +55,6 @@ interface ERPContextType {
 
 const ERPContext = createContext<ERPContextType | undefined>(undefined);
 const ERP_STORAGE_KEY = 'casifly_erp_data';
-
-/** Local calendar end-of-day for YYYY-MM-DD (matches Reports date-range filtering). */
-function endOfLocalDayFromYmd(dayStr: string): Date | null {
-  if (!dayStr || !/^\d{4}-\d{2}-\d{2}$/.test(dayStr)) return null;
-  const [y, m, d] = dayStr.split('-').map(Number);
-  return new Date(y, m - 1, d, 23, 59, 59, 999);
-}
 
 const loadERPFromStorage = () => {
   try {
@@ -186,8 +179,8 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     if (USE_API) {
       return api.postTransaction({ description, type, entries, metadata: metadataWithStore, date: dateStr })
-        .then((t: any) => {
-          setTransactions(prev => [{ id: t.id, date: t.date, description: t.description, type: t.type, entries: t.entries, status: 'COMPLETED', metadata: t.metadata }, ...prev]);
+        .then(async () => {
+          await refreshFromApi();
         })
         .catch(err => { toast.error(err?.message || 'Transaction failed'); throw err; });
     }
@@ -415,17 +408,17 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [transactions, accounts, productId]);
 
   const getAccountBalancesAsOf = useCallback((dayStr: string): Record<string, number> => {
-    const cutoff = endOfLocalDayFromYmd(dayStr);
-    if (!cutoff) return {};
+    if (!dayStr || !/^\d{4}-\d{2}-\d{2}$/.test(dayStr)) return {};
     const balances: Record<string, number> = {};
+    /** Local calendar-day cutoff matches date pickers; avoids UTC vs local end-of-day mismatches. */
     const txnsToUse = productId
       ? transactions.filter(
           t =>
             t.status === 'COMPLETED' &&
             (t.metadata?.storeId ?? '') === productId &&
-            new Date(t.date) <= cutoff
+            txnOnOrBeforeLocalDay(t.date, dayStr)
         )
-      : transactions.filter(t => t.status === 'COMPLETED' && new Date(t.date) <= cutoff);
+      : transactions.filter(t => t.status === 'COMPLETED' && txnOnOrBeforeLocalDay(t.date, dayStr));
 
     accounts.forEach(acc => {
       balances[acc.id] = productId ? 0 : (acc.balance || 0);
