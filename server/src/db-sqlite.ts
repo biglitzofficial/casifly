@@ -37,6 +37,16 @@ sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_accounts_store ON accounts(store_id)
     }
   } catch (_) {}
 })();
+(() => {
+  try {
+    sqlite.prepare(`UPDATE accounts SET name = 'Customer Paid To' WHERE id = 'L001'`).run();
+    sqlite
+      .prepare(
+        `UPDATE accounts SET name = REPLACE(name, ' Payable', ' Paid To') WHERE category = 'Customer' AND name LIKE '% Payable'`
+      )
+      .run();
+  } catch (_) {}
+})();
 sqlite.exec(`CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT NOT NULL, commission_rates TEXT NOT NULL, ledger_account_id TEXT NOT NULL, store_id TEXT, joined_at TEXT, FOREIGN KEY (ledger_account_id) REFERENCES accounts(id))`);
 sqlite.exec(`CREATE TABLE IF NOT EXISTS wallets (id TEXT PRIMARY KEY, name TEXT NOT NULL, ledger_account_id TEXT NOT NULL, pgs TEXT NOT NULL, store_id TEXT, FOREIGN KEY (ledger_account_id) REFERENCES accounts(id))`);
 sqlite.exec(`CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, date TEXT NOT NULL, description TEXT NOT NULL, type TEXT NOT NULL, entries TEXT NOT NULL, status TEXT DEFAULT 'COMPLETED', metadata TEXT, reference_id TEXT)`);
@@ -216,7 +226,7 @@ export const sqliteDb = {
       { id: 'A004', name: 'Wallet A (Razorpay)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
       { id: 'A005', name: 'Wallet B (Paytm)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
       { id: 'A006', name: 'Customer Receivables', type: 'ASSET', category: 'Customer', balance: 0, store_id: null },
-      { id: 'L001', name: 'Customer Payables', type: 'LIABILITY', category: 'Customer', balance: 0, store_id: null },
+      { id: 'L001', name: 'Customer Paid To', type: 'LIABILITY', category: 'Customer', balance: 0, store_id: null },
       { id: 'L002', name: 'Duties & Taxes', type: 'LIABILITY', category: 'Revenue', balance: 0, store_id: null },
       { id: 'Q001', name: "Owner's Equity", type: 'LIABILITY', category: 'Equity', balance: 1000000, store_id: null },
       { id: 'Q002', name: 'Retained Earnings', type: 'LIABILITY', category: 'Equity', balance: 1500000, store_id: null },

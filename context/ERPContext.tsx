@@ -113,6 +113,26 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     });
   }, []);
 
+  /** Rename L001 / per-customer liability labels (Payable → Paid To) in local data. */
+  useEffect(() => {
+    if (USE_API) return;
+    setAccounts((prev) => {
+      let changed = false;
+      const next = prev.map((a) => {
+        if (a.id === 'L001' && a.name !== 'Customer Paid To') {
+          changed = true;
+          return { ...a, name: 'Customer Paid To' };
+        }
+        if (a.category === 'Customer' && / Payable$/.test(a.name)) {
+          changed = true;
+          return { ...a, name: a.name.replace(/ Payable$/, ' Paid To') };
+        }
+        return a;
+      });
+      return changed ? next : prev;
+    });
+  }, []);
+
   useEffect(() => {
     if (!USE_API) {
       localStorage.setItem(ERP_STORAGE_KEY, JSON.stringify({ accounts, customers, wallets: allWallets, transactions }));
@@ -229,7 +249,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (USE_API) {
       try {
         const c = await api.addCustomer({ name: data.name, phone: data.phone, commissionRates: data.commissionRates }) as any;
-        setAccounts(prev => [...prev, { id: c.ledgerAccountId, name: `${c.name} Payable`, type: AccountType.LIABILITY, category: 'Customer' as const, balance: 0 }]);
+        setAccounts(prev => [...prev, { id: c.ledgerAccountId, name: `${c.name} Paid To`, type: AccountType.LIABILITY, category: 'Customer' as const, balance: 0 }]);
         setCustomers(prev => [...prev, { id: c.id, name: c.name, phone: c.phone, commissionRates: c.commissionRates || data.commissionRates, ledgerAccountId: c.ledgerAccountId, joinedAt: c.joinedAt, storeId: c.storeId }]);
         return c.id;
       } catch (e: any) {
@@ -239,7 +259,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
     const ledgerId = generateId('L');
     const customerId = generateId('C');
-    const newAccount: Account = { id: ledgerId, name: `${data.name} Payable`, type: AccountType.LIABILITY, category: 'Customer', balance: 0 };
+    const newAccount: Account = { id: ledgerId, name: `${data.name} Paid To`, type: AccountType.LIABILITY, category: 'Customer', balance: 0 };
     const newCustomer: Customer = { id: customerId, name: data.name, phone: data.phone, commissionRates: data.commissionRates!, ledgerAccountId: ledgerId, joinedAt: new Date().toISOString(), storeId: user?.productId };
     setAccounts(prev => [...prev, newAccount]);
     setCustomers(prev => [...prev, newCustomer]);

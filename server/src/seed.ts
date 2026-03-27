@@ -12,7 +12,7 @@ const INITIAL_ACCOUNTS = [
   { id: 'A004', name: 'Wallet A (Razorpay)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
   { id: 'A005', name: 'Wallet B (Paytm)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
   { id: 'A006', name: 'Customer Receivables', type: 'ASSET', category: 'Customer', balance: 0, store_id: null },
-  { id: 'L001', name: 'Customer Payables', type: 'LIABILITY', category: 'Customer', balance: 0, store_id: null },
+  { id: 'L001', name: 'Customer Paid To', type: 'LIABILITY', category: 'Customer', balance: 0, store_id: null },
   { id: 'L003', name: 'Swipe margin pending settlement', type: 'LIABILITY', category: 'Customer', balance: 0, store_id: null },
   { id: 'L002', name: 'Duties & Taxes', type: 'LIABILITY', category: 'Revenue', balance: 0, store_id: null },
   { id: 'Q001', name: "Owner's Equity", type: 'LIABILITY', category: 'Equity', balance: 1000000, store_id: null },

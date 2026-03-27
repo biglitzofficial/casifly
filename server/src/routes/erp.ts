@@ -80,7 +80,7 @@ erpRouter.post('/customers', async (req, res) => {
   const ledgerId = getId('L');
   const customerId = getId('C');
   const joinedAt = new Date().toISOString();
-  await db.addAccount({ id: ledgerId, name: `${name.trim()} Payable`, type: 'LIABILITY', category: 'Customer', balance: 0 });
+  await db.addAccount({ id: ledgerId, name: `${name.trim()} Paid To`, type: 'LIABILITY', category: 'Customer', balance: 0 });
   await db.addCustomer({ id: customerId, name: name.trim(), phone: digits, commission_rates: JSON.stringify(commissionRates || { visa: 2, master: 2, amex: 3.5, rupay: 1 }), ledger_account_id: ledgerId, store_id: user.productId || null, joined_at: joinedAt });
   res.json({
     id: customerId,
