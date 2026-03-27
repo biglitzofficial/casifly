@@ -287,6 +287,7 @@ export const firestoreDb = {
       { id: 'A005', name: 'Wallet B (Paytm)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
       { id: 'A006', name: 'Customer Receivables', type: 'ASSET', category: 'Customer', balance: 0, store_id: null },
       { id: 'L001', name: 'Customer Payables', type: 'LIABILITY', category: 'Customer', balance: 0, store_id: null },
+      { id: 'L003', name: 'Swipe margin pending settlement', type: 'LIABILITY', category: 'Customer', balance: 0, store_id: null },
       { id: 'L002', name: 'Duties & Taxes', type: 'LIABILITY', category: 'Revenue', balance: 0, store_id: null },
       { id: 'Q001', name: "Owner's Equity", type: 'LIABILITY', category: 'Equity', balance: 1000000, store_id: null },
       { id: 'Q002', name: 'Retained Earnings', type: 'LIABILITY', category: 'Equity', balance: 1500000, store_id: null },
@@ -372,7 +373,7 @@ export const firestoreDb = {
       await b.commit();
     }
 
-    const zeroIds = new Set(['A004', 'A005', 'A006', 'I001', 'I002', 'E001', 'E002', 'E003', 'L001']);
+    const zeroIds = new Set(['A004', 'A005', 'A006', 'I001', 'I002', 'E001', 'E002', 'E003', 'L001', 'L003']);
     batch = f.batch();
     zeroIds.forEach((id) => {
       batch.update(f.collection(C.accounts).doc(id), { balance: 0 });

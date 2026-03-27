@@ -1,15 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useERP } from '../context/ERPContext';
 import { useToast } from '../context/ToastContext';
 import { Layout } from '../components/Layout';
 import { LedgerEntry, TransactionType, Rates } from '../types';
+import {
+  isSwipePayInflow,
+  isSwipeInflowMarginSettledInBooks,
+  swipeInflowPendingMarginAmount,
+} from '../lib/swipeTxnEconomics';
 import { Card, CardContent, CardHeader, Input, Select, Button } from '../components/ui/Elements';
 import { safeParseFloat, roundCurrency } from '../lib/utils';
 import { DEFAULT_COMMISSION_RATES } from '../constants';
 import { ArrowRight, ArrowDownToLine, ArrowUpFromLine, Lock, Unlock, CheckCircle2, Info, UserPlus, Save, X } from 'lucide-react';
 
 export const SwipePay: React.FC = () => {
-  const { customers, wallets, accounts, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer } = useERP();
+  const { customers, wallets, transactions, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer } = useERP();
   const toast = useToast();
 
   // --- Mode: Inflow or Outflow (separate entries) ---
@@ -41,6 +46,20 @@ export const SwipePay: React.FC = () => {
   const [inflowLoading, setInflowLoading] = useState(false);
   const [outflowLoading, setOutflowLoading] = useState(false);
   const [createCustLoading, setCreateCustLoading] = useState(false);
+  const [linkedInflowId, setLinkedInflowId] = useState('');
+
+  const unsettledInflows = useMemo(() => {
+    if (!customerId || mode !== 'outflow') return [];
+    return transactions.filter(
+      (t) =>
+        t.type === TransactionType.SWIPE_PAY &&
+        t.status === 'COMPLETED' &&
+        t.metadata?.customerId === customerId &&
+        isSwipePayInflow(t) &&
+        swipeInflowPendingMarginAmount(t) > 0.005 &&
+        !isSwipeInflowMarginSettledInBooks(t.id, transactions)
+    );
+  }, [transactions, customerId, mode]);
 
   // --- Logic ---
   const selectedWallet = wallets.find(w => w.id === swipeWalletId);
@@ -54,6 +73,11 @@ export const SwipePay: React.FC = () => {
     const rate = commissionRates[cardType as keyof Rates] ?? '0';
     setCurrentServiceRate(String(rate));
   }, [cardType, commissionRates]);
+
+  useEffect(() => {
+    if (!linkedInflowId) return;
+    if (!unsettledInflows.some((t) => t.id === linkedInflowId)) setLinkedInflowId('');
+  }, [unsettledInflows, linkedInflowId]);
 
   // Sync Wallet PG Charge % from selected PG when wallet/pg/card changes
   useEffect(() => {
@@ -86,6 +110,7 @@ export const SwipePay: React.FC = () => {
     setCustomerName('');
     setPhone('');
     setIsNewCustomer(false);
+    setLinkedInflowId('');
   };
 
   const handleCreateCustomer = async (e: React.FormEvent) => {
@@ -165,7 +190,7 @@ export const SwipePay: React.FC = () => {
       { accountId: 'E001', debit: portalFeeAmount, credit: 0 },
       { accountId: selectedWallet.ledgerAccountId, debit: 0, credit: portalFeeAmount },
       { accountId: 'L001', debit: serviceFeeAmount, credit: 0 },
-      { accountId: 'I001', debit: 0, credit: serviceFeeAmount }
+      { accountId: 'L003', debit: 0, credit: serviceFeeAmount }
     ];
       const p = postTransaction(
         `Swipe Inflow: ${customerName} (${cardType.toUpperCase()})`,
@@ -190,6 +215,9 @@ export const SwipePay: React.FC = () => {
     else if (payVal <= 0) err.payoutAmount = 'Settlement amount must be greater than 0';
     if (transferCommission !== '' && (isNaN(transCommVal) || transCommVal < 0)) err.transferCommission = 'Transfer fee must be 0 or more';
     if (transCommVal > payVal) err.transferCommission = 'Transfer fee cannot exceed settlement amount';
+    if (unsettledInflows.length > 0 && !linkedInflowId.trim()) {
+      err.linkedInflow = 'Select the swipe inflow this payout settles to recognise margin in P&L.';
+    }
     setStep2Errors(err);
     if (Object.keys(err).length > 0) return;
 
@@ -198,6 +226,24 @@ export const SwipePay: React.FC = () => {
     if (!outflowWallet) {
       toast.error('Please select a wallet to pay from.');
       return;
+    }
+    const linkId = linkedInflowId.trim();
+    let marginToRecognize = 0;
+    if (linkId) {
+      const linked = transactions.find(t => t.id === linkId);
+      if (!linked || linked.metadata?.customerId !== customerId) {
+        toast.error('Invalid linked inflow for this customer.');
+        return;
+      }
+      marginToRecognize = swipeInflowPendingMarginAmount(linked);
+      if (marginToRecognize < 0.005) {
+        toast.error('Selected inflow has no pending margin (L003) to recognise.');
+        return;
+      }
+      if (isSwipeInflowMarginSettledInBooks(linkId, transactions)) {
+        toast.error('This inflow margin was already recognised.');
+        return;
+      }
     }
     setOutflowLoading(true);
     try {
@@ -209,16 +255,27 @@ export const SwipePay: React.FC = () => {
     if (transCommVal > 0) {
       entries.push({ accountId: 'E001', debit: transCommVal, credit: 0 });
     }
+    if (marginToRecognize > 0.005) {
+      entries.push(
+        { accountId: 'L003', debit: marginToRecognize, credit: 0 },
+        { accountId: 'I001', debit: 0, credit: marginToRecognize }
+      );
+    }
 
       const p = postTransaction(
         `Payout Outflow: ${customerName}`,
         TransactionType.SWIPE_PAY,
         entries,
-        { customerId: customerId || undefined, walletId: outflowWallet.id }
+        {
+          customerId: customerId || undefined,
+          walletId: outflowWallet.id,
+          relatedInflowId: linkId || undefined,
+        }
       );
       if (p && typeof (p as Promise<unknown>).then === 'function') await p;
 
     toast.success('Outflow recorded successfully!');
+    setLinkedInflowId('');
     resetCustomer();
     setPayoutAmount('');
     setTransferCommission('0');
@@ -242,14 +299,14 @@ export const SwipePay: React.FC = () => {
           <div className="flex gap-2 p-2 bg-slate-100 rounded-2xl">
             <button
               type="button"
-              onClick={() => { setMode('inflow'); resetCustomer(); setSwipeAmount(''); setStep1Errors({}); }}
+              onClick={() => { setMode('inflow'); resetCustomer(); setSwipeAmount(''); setStep1Errors({}); setLinkedInflowId(''); }}
               className={`flex-1 flex items-center justify-center gap-2 py-4 px-6 rounded-xl font-bold text-sm uppercase tracking-wider transition-all ${mode === 'inflow' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-200'}`}
             >
               <ArrowDownToLine size={20} /> Inflow Entry
             </button>
             <button
               type="button"
-              onClick={() => { setMode('outflow'); resetCustomer(); setPayoutAmount(''); setTransferCommission('0'); setStep2Errors({}); }}
+              onClick={() => { setMode('outflow'); resetCustomer(); setPayoutAmount(''); setTransferCommission('0'); setStep2Errors({}); setLinkedInflowId(''); }}
               className={`flex-1 flex items-center justify-center gap-2 py-4 px-6 rounded-xl font-bold text-sm uppercase tracking-wider transition-all ${mode === 'outflow' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-200'}`}
             >
               <ArrowUpFromLine size={20} /> Outflow Entry
@@ -406,6 +463,28 @@ export const SwipePay: React.FC = () => {
                         onChange={e => setOutflowWalletId(e.target.value)} 
                         options={wallets.map(w => ({ label: `${w.name} (${formatCurrency(getAccountBalance(w.ledgerAccountId))})`, value: w.id }))} 
                       />
+                      {unsettledInflows.length > 0 && (
+                        <div>
+                          <Select
+                            label="Link swipe inflow (recognises margin in P&L)"
+                            value={linkedInflowId}
+                            onChange={(e) => {
+                              setLinkedInflowId(e.target.value);
+                              setStep2Errors((p) => ({ ...p, linkedInflow: '' }));
+                            }}
+                            options={[
+                              { label: '— Select matching inflow —', value: '' },
+                              ...unsettledInflows.map((t) => ({
+                                value: t.id,
+                                label: `${new Date(t.date).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })} · pending margin ${formatCurrency(swipeInflowPendingMarginAmount(t))}`,
+                              })),
+                            ]}
+                          />
+                          {step2Errors.linkedInflow ? (
+                            <p className="mt-2 text-sm font-medium text-rose-600">{step2Errors.linkedInflow}</p>
+                          ) : null}
+                        </div>
+                      )}
                       <Input label="Internal Note" placeholder="IMPS Ref / Transfer Reason" value={transactionNote} onChange={e => setTransactionNote(e.target.value)} />
                       <Button type="submit" variant="success" size="lg" className="w-full" loading={outflowLoading}>Record Outflow</Button>
                     </form>
@@ -443,10 +522,13 @@ export const SwipePay: React.FC = () => {
                      <p className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2">Net Payable to Customer</p>
                      <p className="text-4xl font-black text-indigo-300 tabular-nums">{formatCurrency(netPayableToCustomer)}</p>
                    </div>
-                   <div className="mt-6 pt-5 border-t-2 border-slate-600">
+                   <div className="mt-6 pt-5 border-t-2 border-slate-600 space-y-2">
+                     <p className="text-xs font-semibold text-slate-400 leading-snug">
+                       Margin is held in ledger (L003) until you record payout outflow and link this inflow; only then it books to Service Charges (P&L).
+                     </p>
                      <div className="flex justify-between items-center">
-                       <span className="text-base font-semibold text-slate-300">Expected Margin</span>
-                       <span className="text-xl font-black text-emerald-400 tabular-nums">+{formatCurrency(estimatedProfit)}</span>
+                       <span className="text-base font-semibold text-slate-300">Pre-settlement estimate</span>
+                       <span className="text-xl font-black text-amber-300/90 tabular-nums">+{formatCurrency(estimatedProfit)}</span>
                      </div>
                    </div>
                 </div>

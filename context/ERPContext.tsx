@@ -101,6 +101,17 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     refreshFromApi();
   }, [user?.id, refreshFromApi]);
 
+  /** Merge new COA rows (e.g. L003) into localStorage-backed books without a full reset. */
+  useEffect(() => {
+    if (USE_API) return;
+    setAccounts((prev) => {
+      const ids = new Set(prev.map((a) => a.id));
+      const missing = INITIAL_ACCOUNTS.filter((a) => !ids.has(a.id));
+      if (missing.length === 0) return prev;
+      return [...prev, ...missing];
+    });
+  }, []);
+
   useEffect(() => {
     if (!USE_API) {
       localStorage.setItem(ERP_STORAGE_KEY, JSON.stringify({ accounts, customers, wallets: allWallets, transactions }));

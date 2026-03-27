@@ -25,6 +25,18 @@ sqlite.exec(`CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, name TEXT
   } catch (_) {}
 })();
 sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_accounts_store ON accounts(store_id)`);
+(() => {
+  try {
+    const row = sqlite.prepare(`SELECT 1 AS ok FROM accounts WHERE id = 'L003'`).get() as { ok?: number } | undefined;
+    if (!row) {
+      sqlite
+        .prepare(
+          `INSERT INTO accounts (id, name, type, category, balance, store_id) VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .run('L003', 'Swipe margin pending settlement', 'LIABILITY', 'Customer', 0, null);
+    }
+  } catch (_) {}
+})();
 sqlite.exec(`CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT NOT NULL, commission_rates TEXT NOT NULL, ledger_account_id TEXT NOT NULL, store_id TEXT, joined_at TEXT, FOREIGN KEY (ledger_account_id) REFERENCES accounts(id))`);
 sqlite.exec(`CREATE TABLE IF NOT EXISTS wallets (id TEXT PRIMARY KEY, name TEXT NOT NULL, ledger_account_id TEXT NOT NULL, pgs TEXT NOT NULL, store_id TEXT, FOREIGN KEY (ledger_account_id) REFERENCES accounts(id))`);
 sqlite.exec(`CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, date TEXT NOT NULL, description TEXT NOT NULL, type TEXT NOT NULL, entries TEXT NOT NULL, status TEXT DEFAULT 'COMPLETED', metadata TEXT, reference_id TEXT)`);
@@ -255,7 +267,7 @@ export const sqliteDb = {
     for (const w of INITIAL_WALLETS) {
       insWallet.run(w.id, w.name, w.ledger_account_id, w.pgs, w.store_id);
     }
-    sqlite.prepare("UPDATE accounts SET balance = 0 WHERE id IN ('A004','A005','A006','I001','I002','E001','E002','E003','L001')").run();
+    sqlite.prepare("UPDATE accounts SET balance = 0 WHERE id IN ('A004','A005','A006','I001','I002','E001','E002','E003','L001','L003')").run();
     sqlite.prepare("UPDATE accounts SET balance = 0 WHERE type = 'LIABILITY' AND category = 'Customer'").run();
     sqlite.prepare("UPDATE accounts SET name = 'Wallet A (Razorpay)' WHERE id = 'A004'").run();
     sqlite.prepare("UPDATE accounts SET name = 'Wallet B (Paytm)' WHERE id = 'A005'").run();

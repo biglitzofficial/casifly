@@ -142,7 +142,7 @@ export const Reports: React.FC = () => {
     let data = filteredTransactions
       .filter(t => isSwipePayInflow(t))
       .map(t => {
-        const econ = parseSwipeInflowEconomics(t)!;
+        const econ = parseSwipeInflowEconomics(t, filteredTransactions)!;
         const customer = customers.find(c => c.id === t.metadata?.customerId);
         const wallet = wallets.find(w => w.id === t.metadata?.walletId);
         const cardRaw = (t.metadata?.cardType || 'visa').toUpperCase();

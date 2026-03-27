@@ -7,19 +7,43 @@ function sumAcct(entries: LedgerEntry[], accountId: string, side: 'debit' | 'cre
     .reduce((s, e) => s + (side === 'debit' ? e.debit : e.credit), 0);
 }
 
-/** Swipe **inflow** (customer swipe booked): commission to I001, portal MDR to E001, full amount credited to L001. */
+/** Swipe **inflow**: gross to L001 (Cr), portal MDR to E001; margin to L003 and/or legacy I001 on the inflow txn. */
 export function isSwipePayInflow(t: Transaction): boolean {
   if (t.type !== TransactionType.SWIPE_PAY || t.status !== 'COMPLETED') return false;
-  if (sumAcct(t.entries, 'I001', 'credit') < 0.005) return false;
   if (sumAcct(t.entries, 'L001', 'credit') < 0.005) return false;
+  const marginLine =
+    sumAcct(t.entries, 'L003', 'credit') > 0.005 || sumAcct(t.entries, 'I001', 'credit') > 0.005;
+  if (!marginLine) return false;
   return true;
 }
 
-/** Payout **outflow**: reduces L001, no I001 income line. */
+/** Payout **outflow**: Dr L001 (and optional L003 Dr / I001 Cr when margin is recognised). Not an inflow (no L001 Cr from swipe). */
 export function isSwipePayOutflow(t: Transaction): boolean {
   if (t.type !== TransactionType.SWIPE_PAY || t.status !== 'COMPLETED') return false;
-  if (sumAcct(t.entries, 'I001', 'credit') > 0.005) return false;
+  if (sumAcct(t.entries, 'L001', 'credit') > 0.005) return false;
   return sumAcct(t.entries, 'L001', 'debit') > 0.005;
+}
+
+/** Pending swipe margin still in L003 on the inflow transaction (new flow). */
+export function swipeInflowPendingMarginAmount(t: Transaction): number {
+  return roundCurrency(sumAcct(t.entries, 'L003', 'credit'));
+}
+
+/** An outflow has already posted I001 for this inflow (metadata link). */
+export function isSwipeInflowMarginSettledInBooks(inflowId: string, transactions: Transaction[]): boolean {
+  return transactions.some(
+    (ot) =>
+      ot.type === TransactionType.SWIPE_PAY &&
+      ot.status === 'COMPLETED' &&
+      ot.metadata?.relatedInflowId === inflowId &&
+      sumAcct(ot.entries, 'I001', 'credit') > 0.005
+  );
+}
+
+/** Legacy: I001 credited on inflow. New: I001 only after linked outflow. */
+export function isSwipeMarginRecognizedForInflow(inflow: Transaction, allTxns: Transaction[]): boolean {
+  if (sumAcct(inflow.entries, 'I001', 'credit') > 0.005) return true;
+  return isSwipeInflowMarginSettledInBooks(inflow.id, allTxns);
 }
 
 export function transferExpenseFromOutflow(t: Transaction): number {
@@ -38,20 +62,23 @@ export type SwipeInflowEconomics = {
   grossProfit: number /** shop charges − app charges */;
 };
 
-export function parseSwipeInflowEconomics(t: Transaction): SwipeInflowEconomics | null {
+export function parseSwipeInflowEconomics(t: Transaction, allTxns: Transaction[] = []): SwipeInflowEconomics | null {
   if (!isSwipePayInflow(t)) return null;
-  const shopCharges = roundCurrency(sumAcct(t.entries, 'I001', 'credit'));
+  const shopCharges = roundCurrency(
+    sumAcct(t.entries, 'L003', 'credit') + sumAcct(t.entries, 'I001', 'credit')
+  );
   const appCharges = roundCurrency(sumAcct(t.entries, 'E001', 'debit'));
   const l001Credit = roundCurrency(sumAcct(t.entries, 'L001', 'credit'));
   const actualAmount = l001Credit > 0 ? l001Credit : roundCurrency(shopCharges + appCharges);
   if (actualAmount < 0.005) return null;
 
+  const marginRecognized = isSwipeMarginRecognizedForInflow(t, allTxns);
   const grossAmount = roundCurrency(actualAmount - appCharges);
   const shopPct = (shopCharges / actualAmount) * 100;
   const customerPct = shopPct;
   const appPct = (appCharges / actualAmount) * 100;
   const netAmount = roundCurrency(actualAmount - shopCharges);
-  const grossProfit = roundCurrency(shopCharges - appCharges);
+  const grossProfit = marginRecognized ? roundCurrency(shopCharges - appCharges) : 0;
 
   return {
     actualAmount,
@@ -95,6 +122,7 @@ export function localDayKey(isoDate: string): string {
  */
 export function buildTransferExpensePerInflowId(transactions: Transaction[]): Map<string, number> {
   const inflows = transactions.filter(isSwipePayInflow);
+  const recognized = (i: Transaction) => isSwipeMarginRecognizedForInflow(i, transactions);
   const outflows = transactions.filter(isSwipePayOutflow);
   const keyOf = (customerId: string, day: string) => `${customerId}|${day}`;
 
@@ -108,6 +136,7 @@ export function buildTransferExpensePerInflowId(transactions: Transaction[]): Ma
 
   const inflowsByKey = new Map<string, Transaction[]>();
   for (const i of inflows) {
+    if (!recognized(i)) continue;
     const cid = i.metadata?.customerId;
     if (!cid) continue;
     const k = keyOf(cid, localDayKey(i.date));
@@ -117,6 +146,10 @@ export function buildTransferExpensePerInflowId(transactions: Transaction[]): Ma
 
   const alloc = new Map<string, number>();
   for (const i of inflows) {
+    if (!recognized(i)) {
+      alloc.set(i.id, 0);
+      continue;
+    }
     const cid = i.metadata?.customerId;
     if (!cid) {
       alloc.set(i.id, 0);

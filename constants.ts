@@ -12,6 +12,8 @@ export const INITIAL_ACCOUNTS: Account[] = [
 
   // Liabilities
   { id: 'L001', name: 'Customer Payables', type: AccountType.LIABILITY, category: 'Customer', balance: 0 },
+  /** Swipe commission held until payout outflow links the inflow (then Dr L003 / Cr I001). */
+  { id: 'L003', name: 'Swipe margin pending settlement', type: AccountType.LIABILITY, category: 'Customer', balance: 0 },
   { id: 'L002', name: 'Duties & Taxes', type: AccountType.LIABILITY, category: 'Revenue', balance: 0 },
 
   // Equity
