@@ -46,6 +46,29 @@ export function isSwipeMarginRecognizedForInflow(inflow: Transaction, allTxns: T
   return isSwipeInflowMarginSettledInBooks(inflow.id, allTxns);
 }
 
+/**
+ * E001 on swipe inflows whose margin is still in L003 (not yet in I001). Subset variant: only
+ * sums txns present in `subset` (e.g. filtered by card/wallet) while recognition uses `allTxns`.
+ */
+export function deferredSwipePortalExpenseInSubset(subset: Transaction[], allTxns: Transaction[]): number {
+  let sum = 0;
+  for (const t of subset) {
+    if (t.status !== 'COMPLETED') continue;
+    if (!isSwipePayInflow(t)) continue;
+    if (isSwipeMarginRecognizedForInflow(t, allTxns)) continue;
+    sum += sumAcct(t.entries, 'E001', 'debit');
+  }
+  return roundCurrency(sum);
+}
+
+/**
+ * Portal / MDR (E001) on pending-margin swipe inflows — exclude from headline P&L so dashboard /
+ * Profit & Loss match Transaction P&L (no orphan expense vs deferred income).
+ */
+export function deferredSwipePortalExpenseExcludedFromPl(transactions: Transaction[]): number {
+  return deferredSwipePortalExpenseInSubset(transactions, transactions);
+}
+
 export function transferExpenseFromOutflow(t: Transaction): number {
   return roundCurrency(sumAcct(t.entries, 'E001', 'debit'));
 }

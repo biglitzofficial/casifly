@@ -5,7 +5,8 @@ import {
   BalanceSheet, ProfitAndLoss,
 } from '../types';
 import { INITIAL_ACCOUNTS, INITIAL_CUSTOMERS, INITIAL_WALLETS } from '../constants';
-import { formatCurrency, generateId, txnOnOrBeforeLocalDay } from '../lib/utils';
+import { formatCurrency, generateId, roundCurrency, txnOnOrBeforeLocalDay } from '../lib/utils';
+import { deferredSwipePortalExpenseExcludedFromPl } from '../lib/swipeTxnEconomics';
 import { useToast } from './ToastContext';
 import { useAuth } from './AuthContext';
 import { api, USE_API } from '../lib/api';
@@ -454,13 +455,22 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const getLedger = (accountId: string) => transactionsForUser.filter(txn => txn.entries.some(e => e.accountId === accountId));
 
   const generateProfitAndLoss = (): ProfitAndLoss => {
+    const deferredSwipePortal = deferredSwipePortalExpenseExcludedFromPl(
+      transactionsForUser.filter(t => t.status === 'COMPLETED')
+    );
     const income = accounts
       .filter(a => a.type === AccountType.INCOME)
       .map(a => ({ account: a, balance: getAccountBalance(a.id) }));
     
     const expenses = accounts
       .filter(a => a.type === AccountType.EXPENSE)
-      .map(a => ({ account: a, balance: getAccountBalance(a.id) }));
+      .map(a => {
+        let balance = getAccountBalance(a.id);
+        if (a.id === 'E001' && deferredSwipePortal > 0.005) {
+          balance = roundCurrency(Math.max(0, balance - deferredSwipePortal));
+        }
+        return { account: a, balance };
+      });
 
     const totalIncome = income.reduce((sum, item) => sum + item.balance, 0);
     const totalExpenses = expenses.reduce((sum, item) => sum + item.balance, 0);

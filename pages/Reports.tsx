@@ -14,6 +14,7 @@ import {
   parseSwipeInflowEconomics,
   inferPgName,
   buildTransferExpensePerInflowId,
+  deferredSwipePortalExpenseInSubset,
 } from '../lib/swipeTxnEconomics';
 
 type ReportTab = 'overview' | 'balance-sheet' | 'pl' | 'transactions' | 'card' | 'wallet' | 'customer';
@@ -111,6 +112,8 @@ export const Reports: React.FC = () => {
         if (['E001', 'E002', 'E003'].includes(e.accountId)) expense += e.debit;
       });
     });
+    const deferredPortal = deferredSwipePortalExpenseInSubset(txns, filteredTransactions);
+    expense -= deferredPortal;
     return { income, expense, profit: income - expense };
   };
 
