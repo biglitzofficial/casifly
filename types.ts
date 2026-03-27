@@ -160,5 +160,8 @@ export interface ProfitAndLoss {
   expenses: { account: Account; balance: number }[];
   totalIncome: number;
   totalExpenses: number;
+  /** Workbook-style: E001 reduced by deferred swipe portal on unsettled inflows (dashboard / P&L tab). */
   netProfit: number;
+  /** Raw ledger income − expenses; retained earnings adjustment on balance sheet so A = L + E. */
+  netProfitLedger: number;
 }

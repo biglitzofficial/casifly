@@ -494,9 +494,13 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const totalIncome = income.reduce((sum, item) => sum + item.balance, 0);
     const totalExpenses = expenses.reduce((sum, item) => sum + item.balance, 0);
-    const netProfit = totalIncome - totalExpenses;
+    const netProfit = roundCurrency(totalIncome - totalExpenses);
+    const totalExpensesLedger = accounts
+      .filter(a => a.type === AccountType.EXPENSE)
+      .reduce((sum, a) => sum + getAccountBalance(a.id), 0);
+    const netProfitLedger = roundCurrency(totalIncome - totalExpensesLedger);
 
-    return { income, expenses, totalIncome, totalExpenses, netProfit };
+    return { income, expenses, totalIncome, totalExpenses, netProfit, netProfitLedger };
   };
 
   const generateBalanceSheet = (): BalanceSheet => {
@@ -514,9 +518,9 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       .filter(a => a.category === 'Equity')
       .map(a => {
         let balance = getAccountBalance(a.id);
-        // Add net profit to Retained Earnings for reporting
+        // Ledger-faithful period P&L (must match assets/liabilities); not workbook-adjusted netProfit
         if (a.id === 'Q002') {
-          balance += pl.netProfit;
+          balance += pl.netProfitLedger;
         }
         return { account: a, balance };
       });
