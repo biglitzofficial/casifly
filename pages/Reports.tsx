@@ -16,8 +16,10 @@ import {
   buildTransferExpensePerInflowId,
   deferredSwipePortalExpenseInSubset,
 } from '../lib/swipeTxnEconomics';
+import { buildPaySwipePLRows } from '../lib/paySwipeTxnReport';
 
 type ReportTab = 'overview' | 'balance-sheet' | 'pl' | 'transactions' | 'card' | 'wallet' | 'customer';
+type TxnPlMode = 'swipe-inflow' | 'pay-swipe';
 
 function localYmd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -35,7 +37,7 @@ const formatPct = (n: number) => `${n.toFixed(2)}%`;
 
 export const Reports: React.FC = () => {
   const { user } = useAuth();
-  const { transactions, wallets, customers, formatCurrency, generateProfitAndLoss, getAccountBalancesAsOf } = useERP();
+  const { transactions, wallets, customers, accounts, formatCurrency, generateProfitAndLoss, getAccountBalancesAsOf } = useERP();
   const [activeTab, setActiveTab] = useState<ReportTab>('overview');
   const [search, setSearch] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>({ from: '', to: '', preset: 'allTime' });
@@ -43,6 +45,7 @@ export const Reports: React.FC = () => {
   const [txnCustomerFilter, setTxnCustomerFilter] = useState('all');
   const [txnWalletFilter, setTxnWalletFilter] = useState('all');
   const [txnSortBy, setTxnSortBy] = useState<'date' | 'profit' | 'revenue' | 'cost'>('date');
+  const [txnPlMode, setTxnPlMode] = useState<TxnPlMode>('swipe-inflow');
 
   const [bsCompareDayA, setBsCompareDayA] = useState(() => {
     const t = new Date();
@@ -200,6 +203,24 @@ export const Reports: React.FC = () => {
     return data;
   }, [filteredTransactions, customers, wallets, user?.id, user?.name, txnCustomerFilter, txnWalletFilter, txnSortBy]);
 
+  const paySwipeTxnPL = useMemo(() => {
+    let data = buildPaySwipePLRows(filteredTransactions, wallets, accounts, customers, user?.id, user?.name);
+    if (txnCustomerFilter !== 'all') {
+      data = data.filter((r) => r.customerId === txnCustomerFilter);
+    }
+    if (txnWalletFilter !== 'all') {
+      data = data.filter((r) => r.kind === 'recovery' && r.raw.metadata?.walletId === txnWalletFilter);
+    }
+    data = [...data].sort((a, b) => {
+      if (txnSortBy === 'date') return new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (txnSortBy === 'profit') return b.netMargin - a.netMargin;
+      if (txnSortBy === 'revenue') return b.principal - a.principal;
+      if (txnSortBy === 'cost') return b.mdrCost - a.mdrCost;
+      return 0;
+    });
+    return data;
+  }, [filteredTransactions, wallets, accounts, customers, user?.id, user?.name, txnCustomerFilter, txnWalletFilter, txnSortBy]);
+
   const totalPL = calculatePL(filteredTransactions);
 
   const exportPL = () => {
@@ -232,6 +253,30 @@ export const Reports: React.FC = () => {
   };
 
   const exportTxnPL = () => {
+    if (txnPlMode === 'pay-swipe') {
+      const headers = [
+        '#', 'Date', 'Lead', 'Customer', 'Type', 'Wallet', 'Card', 'Principal', 'MDR', 'Net to wallet',
+        'Charges collected', 'Collected / paid from', 'Net margin', 'Remarks',
+      ];
+      const rows = paySwipeTxnPL.map((r, i) => [
+        String(i + 1),
+        new Date(r.date).toLocaleDateString(),
+        r.lead,
+        r.customer,
+        r.kind === 'advance' ? 'Advance' : 'Recovery',
+        r.walletName,
+        r.card,
+        formatCurrency(r.principal),
+        formatCurrency(r.mdrCost),
+        formatCurrency(r.netToWallet),
+        formatCurrency(r.chargesCollected),
+        r.counterpartyAccount,
+        formatCurrency(r.netMargin),
+        r.remarks,
+      ]);
+      exportToCSV('transaction-pl-pay-swipe', headers, rows);
+      return;
+    }
     const headers = [
       '#', 'Date', 'Lead', 'Bank', 'Card #', 'Card type', 'App (portal)',
       'Actual amount', 'Gross amount', 'Shop %', 'Customer %', 'App %',
@@ -262,7 +307,7 @@ export const Reports: React.FC = () => {
       formatCurrency(r.commission),
       r.remarks,
     ]);
-    exportToCSV('transaction-pl', headers, rows);
+    exportToCSV('transaction-pl-swipe-inflow', headers, rows);
   };
 
   return (
@@ -434,7 +479,27 @@ export const Reports: React.FC = () => {
         {activeTab === 'transactions' && (
           <>
             <FilterSection title="Transaction Filters">
-              <div className="flex flex-wrap gap-4 items-center bg-white/95 backdrop-blur-md p-6 rounded-3xl border-2 border-slate-100/80 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.06)]">
+              <div className="flex flex-col gap-4 bg-white/95 backdrop-blur-md p-6 rounded-3xl border-2 border-slate-100/80 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.06)]">
+                <div>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Report source</p>
+                  <div className="flex flex-wrap gap-2 p-1 bg-slate-100 rounded-xl w-fit">
+                    <button
+                      type="button"
+                      onClick={() => setTxnPlMode('swipe-inflow')}
+                      className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-all ${txnPlMode === 'swipe-inflow' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-white'}`}
+                    >
+                      Swipe Inflow (Swipe &amp; Pay)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTxnPlMode('pay-swipe')}
+                      className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-all ${txnPlMode === 'pay-swipe' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-600 hover:bg-white'}`}
+                    >
+                      Pay &amp; Swipe (Advance / Recovery)
+                    </button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-4 items-center">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Customer</label>
                   <select
@@ -452,6 +517,7 @@ export const Reports: React.FC = () => {
                     value={txnWalletFilter}
                     onChange={e => setTxnWalletFilter(e.target.value)}
                     className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 min-w-[180px]"
+                    title={txnPlMode === 'pay-swipe' ? 'Recovery rows only; advances have no wallet' : 'Swipe inflow wallet'}
                   >
                     <option value="all">All Wallets</option>
                     {wallets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
@@ -465,9 +531,9 @@ export const Reports: React.FC = () => {
                     className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 min-w-[160px]"
                   >
                     <option value="date">Date (newest first)</option>
-                    <option value="profit">Net profit (high to low)</option>
-                    <option value="revenue">Actual amount (high to low)</option>
-                    <option value="cost">App / portal charges (high to low)</option>
+                    <option value="profit">{txnPlMode === 'pay-swipe' ? 'Net margin (high to low)' : 'Net profit (high to low)'}</option>
+                    <option value="revenue">{txnPlMode === 'pay-swipe' ? 'Principal (high to low)' : 'Actual amount (high to low)'}</option>
+                    <option value="cost">{txnPlMode === 'pay-swipe' ? 'MDR cost (high to low)' : 'App / portal charges (high to low)'}</option>
                   </select>
                 </div>
                 {(txnCustomerFilter !== 'all' || txnWalletFilter !== 'all') && (
@@ -479,17 +545,31 @@ export const Reports: React.FC = () => {
                     Clear filters
                   </button>
                 )}
+                </div>
               </div>
             </FilterSection>
             <Card>
             <CardHeader
-              title="Transaction P&L (swipe inflow)"
-              subtitle="Workbook-style math: gross = actual − app charges; gross profit = shop − app charges; net profit = gross profit − transfer expense. Payout (same customer & calendar day) is split evenly across inflows in the filtered range."
+              title={txnPlMode === 'swipe-inflow' ? 'Transaction P&L (Swipe Inflow)' : 'Transaction P&L (Pay & Swipe)'}
+              subtitle={
+                txnPlMode === 'swipe-inflow'
+                  ? 'Workbook-style math: gross = actual − app charges; gross profit = shop − app charges; net profit = gross profit − transfer expense. Payout (same customer & calendar day) is split evenly across inflows in the filtered range.'
+                  : 'Advance = customer receivable (A006) funded from bank/cash/wallet. Recovery = swipe clears receivable, MDR to E001, net to wallet, charges collected to I001. Net margin = charges collected − MDR (recovery rows).'
+              }
               action={<Button size="sm" variant="outline" onClick={exportTxnPL}><Download size={14} /> Export CSV</Button>}
             />
             <p className="px-6 -mt-2 mb-2 text-xs text-slate-500">
-              <strong>Swipe Pay inflow</strong> rows only (card numbers are not stored). Customer name stays in filters/search via Data Filters above.
+              {txnPlMode === 'swipe-inflow' ? (
+                <>
+                  <strong>Swipe &amp; Pay inflow</strong> rows only (card numbers are not stored). Customer name stays in filters/search via Data Filters above.
+                </>
+              ) : (
+                <>
+                  <strong>Pay &amp; Swipe</strong> advances and recoveries from the filtered date range / search. Wallet filter applies to <em>recovery</em> rows only.
+                </>
+              )}
             </p>
+            {txnPlMode === 'swipe-inflow' ? (
             <DataTable 
               minTableWidth={1680}
               headers={['#', 'Date', 'Lead', 'Bank', 'Card #', 'Card', 'App', 'Actual', 'Gross', 'Shop %', 'Cust %', 'App %', 'App chg', 'Shop chg', 'Cust chg', 'Net amt', 'Gr profit', 'Xfer exp', 'Net profit', 'Comm', 'Remarks']}
@@ -518,6 +598,29 @@ export const Reports: React.FC = () => {
               ])}
               rightAlignColumns={[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]}
             />
+            ) : (
+            <DataTable
+              minTableWidth={1520}
+              headers={['#', 'Date', 'Lead', 'Customer', 'Type', 'Wallet', 'Card', 'Principal', 'MDR', 'Net to wlt', 'Charges coll.', 'From / into', 'Net margin', 'Remarks']}
+              rows={paySwipeTxnPL.map((t, idx) => [
+                idx + 1,
+                new Date(t.date).toLocaleDateString(),
+                t.lead,
+                <span className="font-medium text-slate-800 whitespace-nowrap">{t.customer}</span>,
+                <span className={`font-bold text-xs uppercase px-2 py-0.5 rounded-md ${t.kind === 'advance' ? 'bg-slate-200 text-slate-700' : 'bg-emerald-100 text-emerald-800'}`}>{t.kind === 'advance' ? 'Advance' : 'Recovery'}</span>,
+                <span className="whitespace-nowrap">{t.walletName}</span>,
+                t.card,
+                formatCurrency(t.principal),
+                formatCurrency(t.mdrCost),
+                formatCurrency(t.netToWallet),
+                formatCurrency(t.chargesCollected),
+                <span className="whitespace-nowrap text-slate-700">{t.counterpartyAccount}</span>,
+                <span className={`font-bold ${t.netMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(t.netMargin)}</span>,
+                <span className="max-w-[10rem] truncate block text-xs text-slate-600" title={t.raw.description}>{t.remarks}</span>,
+              ])}
+              rightAlignColumns={[7, 8, 9, 10, 11, 12]}
+            />
+            )}
           </Card>
           </>
         )}
