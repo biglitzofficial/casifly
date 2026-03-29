@@ -6,7 +6,7 @@ import { AccountType, LedgerEntry, TransactionType, Rates } from '../types';
 import { Card, CardContent, Input, Select, Button } from '../components/ui/Elements';
 import { safeParseFloat, roundCurrency } from '../lib/utils';
 import { ArrowRight, CheckCircle2, Search } from 'lucide-react';
-import { DEFAULT_COMMISSION_RATES } from '../constants';
+import { DEFAULT_COMMISSION_RATES, INITIAL_ACCOUNTS } from '../constants';
 
 export const PaySwipe: React.FC = () => {
   const { customers, wallets, accounts, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer } = useERP();
@@ -90,13 +90,33 @@ export const PaySwipe: React.FC = () => {
   const selectedWallet = wallets.find(w => w.id === swipeWalletId);
   const selectedPG = selectedWallet?.pgs.find(p => p.name === pgName) || selectedWallet?.pgs[0];
 
+  const isAssetCashBankWallet = (a: { type: string; category: string }) => {
+    if (a.type !== AccountType.ASSET && a.type !== 'ASSET') return false;
+    return ['Bank', 'Cash', 'Wallet'].includes(a.category);
+  };
+
+  /**
+   * Merge live `accounts` with seed COA so Bank lines (e.g. HDFC / ICICI) always appear even if
+   * the store list was trimmed — same pattern as Masters defaults.
+   */
+  const assetDestinationAccounts = useMemo(() => {
+    const byId = new Map<string, (typeof accounts)[0]>();
+    for (const a of accounts) {
+      if (isAssetCashBankWallet(a)) byId.set(a.id, a);
+    }
+    for (const a of INITIAL_ACCOUNTS) {
+      if (!isAssetCashBankWallet(a)) continue;
+      if (!byId.has(a.id)) {
+        byId.set(a.id, a as (typeof accounts)[0]);
+      }
+    }
+    return [...byId.values()];
+  }, [accounts]);
+
   /** Bank first, then cash, then wallets — labels make “store in bank” obvious. */
   const collectIntoOptions = useMemo(() => {
     const order: Record<string, number> = { Bank: 0, Cash: 1, Wallet: 2 };
-    const list = accounts.filter(
-      (a) => a.type === AccountType.ASSET && ['Bank', 'Cash', 'Wallet'].includes(a.category)
-    );
-    return [...list]
+    return [...assetDestinationAccounts]
       .sort((a, b) => {
         const d = (order[a.category] ?? 99) - (order[b.category] ?? 99);
         return d !== 0 ? d : a.name.localeCompare(b.name);
@@ -108,7 +128,14 @@ export const PaySwipe: React.FC = () => {
           label: `${prefix} — ${a.name}`,
         };
       });
-  }, [accounts]);
+  }, [assetDestinationAccounts]);
+
+  useEffect(() => {
+    if (collectIntoOptions.length === 0) return;
+    if (!collectIntoOptions.some((o) => o.value === collectAccount)) {
+      setCollectAccount(collectIntoOptions[0].value);
+    }
+  }, [collectIntoOptions, collectAccount]);
 
   // Auto-set initial PG
   useEffect(() => {
@@ -251,9 +278,19 @@ export const PaySwipe: React.FC = () => {
     resetRecoveryForm();
   };
 
+  const recoveryMdrAmt = mdrPercent > 0 ? roundCurrency(recoveryAmt * (mdrPercent / 100)) : 0;
+  const recoveryNetToWallet = Math.max(0, roundCurrency(recoveryAmt - recoveryMdrAmt));
+  const collectIntoLabel = collectIntoOptions.find((o) => o.value === collectAccount)?.label ?? '—';
+  const payFromOptions = collectIntoOptions.map((o) => ({
+    value: o.value,
+    label: `${o.label} (${formatCurrency(getAccountBalance(o.value))})`,
+  }));
+
   return (
     <Layout title="Pay & Swipe (Advance Flow)">
-      <div className="max-w-3xl mx-auto">
+      <div className={`mx-auto ${mode === 'recovery' ? 'max-w-6xl' : 'max-w-3xl'}`}>
+        <div className={mode === 'recovery' ? 'grid grid-cols-1 lg:grid-cols-3 gap-8' : ''}>
+          <div className={mode === 'recovery' ? 'lg:col-span-2 space-y-6' : 'space-y-6'}>
         <div className="flex items-center gap-2 p-2 bg-slate-100 rounded-2xl mb-8">
           <button type="button" onClick={() => { setMode('advance'); resetForm(); }} className={`flex-1 py-3 px-5 rounded-xl font-bold transition-all ${mode === 'advance' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-white'}`}>
             Pay Advance
@@ -291,7 +328,7 @@ export const PaySwipe: React.FC = () => {
                 </div>
 
                 <Input label="Advance Amount" type="number" className="font-bold text-lg" value={payAmount} onChange={e => { setPayAmount(e.target.value); setErrors(p => ({...p, payAmount: ''})); }} error={errors.payAmount} placeholder="0" />
-                <Select label="Pay From" value={paySourceId} onChange={e => setPaySourceId(e.target.value)} options={accounts.filter(a => ['Bank', 'Cash', 'Wallet'].includes(a.category)).map(a => ({ label: `${a.name} (${formatCurrency(getAccountBalance(a.id))})`, value: a.id }))} />
+                <Select label="Pay From" value={paySourceId} onChange={e => setPaySourceId(e.target.value)} options={payFromOptions.length ? payFromOptions : collectIntoOptions} />
                 <Button type="submit" className="w-full">Pay Bill (Record Advance) <ArrowRight size={16}/></Button>
               </form>
             ) : (
@@ -317,7 +354,10 @@ export const PaySwipe: React.FC = () => {
 
                 {customerId && !isNewCustomer && (
                   <>
-                <Input label="Recovery Amount (₹)" type="number" className="font-bold text-lg" value={recoveryAmount} onChange={e => { setRecoveryAmount(e.target.value); setRecoveryErrors(p => ({...p, recoveryAmount: ''})); }} error={recoveryErrors.recoveryAmount} placeholder="0" />
+                <div>
+                  <Input label="Amount to be swiped — principal (₹)" type="number" className="font-bold text-lg" value={recoveryAmount} onChange={e => { setRecoveryAmount(e.target.value); setRecoveryErrors(p => ({...p, recoveryAmount: ''})); }} error={recoveryErrors.recoveryAmount} placeholder="0" />
+                  <p className="text-xs text-slate-500 mt-1.5 font-medium">Gross card amount cleared from receivables (same as <strong>Principal</strong> in Transaction P&amp;L).</p>
+                </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Select label="Swipe Into Wallet" value={swipeWalletId} onChange={e => setSwipeWalletId(e.target.value)} options={wallets.map(w => ({ label: w.name, value: w.id }))} />
@@ -361,15 +401,10 @@ export const PaySwipe: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Input label="Charges Collected" type="number" value={collectionAmount} onChange={e => { setCollectionAmount(e.target.value); setRecoveryErrors(p => ({...p, collectionAmount: ''})); }} error={recoveryErrors.collectionAmount} />
-                    <p className="text-xs text-slate-500 mt-1.5 font-medium">Calculated via {currentCommRate}%</p>
+                    <Input label="Charges collected — your fee (₹)" type="number" value={collectionAmount} onChange={e => { setCollectionAmount(e.target.value); setRecoveryErrors(p => ({...p, collectionAmount: ''})); }} error={recoveryErrors.collectionAmount} />
+                    <p className="text-xs text-slate-500 mt-1.5 font-medium">Default from rate {currentCommRate}% on principal; edit if needed. Books to income (I001) into the account below.</p>
                   </div>
-                  <Select label="Collected Into" value={collectAccount} onChange={e => setCollectAccount(e.target.value)} options={collectIntoOptions} />
-                </div>
-                
-                <div className="flex flex-wrap justify-end gap-4 text-xs font-medium">
-                  <span className="text-slate-500">Est. MDR Cost: {formatCurrency(mdrPercent > 0 ? roundCurrency(recoveryAmt * (mdrPercent / 100)) : 0)}</span>
-                  <span className="text-emerald-600">Net to Wallet: {formatCurrency(Math.max(0, recoveryAmt - (mdrPercent > 0 ? roundCurrency(recoveryAmt * (mdrPercent / 100)) : 0)))}</span>
+                  <Select label="Collected into (cash / bank / wallet)" value={collectAccount} onChange={e => setCollectAccount(e.target.value)} options={collectIntoOptions} />
                 </div>
 
                 <Button type="submit" variant="success" className="w-full">Complete Recovery</Button>
@@ -379,6 +414,48 @@ export const PaySwipe: React.FC = () => {
             )}
           </CardContent>
         </Card>
+          </div>
+
+          {mode === 'recovery' && (
+            <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
+              {customerId && !isNewCustomer ? (
+                <Card className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border-0 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.45)] overflow-hidden text-white">
+                  <div className="px-5 py-4 bg-gradient-to-r from-emerald-900/80 to-slate-800 border-b border-slate-600/50">
+                    <h3 className="text-lg font-black tracking-tight">Recovery breakdown</h3>
+                    <p className="text-xs text-slate-300 mt-1 leading-snug">Principal, charges collected, MDR, and net to wallet — same split as <strong className="text-slate-200">Reports → Transaction P&amp;L (Pay &amp; Swipe)</strong>.</p>
+                  </div>
+                  <CardContent className="p-6 space-y-5 bg-slate-800/40">
+                    <div className="flex justify-between items-baseline gap-3">
+                      <span className="text-sm font-semibold text-slate-300">Amount to be swiped (principal)</span>
+                      <span className="text-xl font-black tabular-nums text-white">{formatCurrency(recoveryAmt)}</span>
+                    </div>
+                    <div className="flex justify-between items-baseline gap-3">
+                      <span className="text-sm font-semibold text-indigo-200">Charges collected ({String(currentCommRate)}%)</span>
+                      <span className="text-lg font-bold tabular-nums text-indigo-100">{formatCurrency(collAmount)}</span>
+                    </div>
+                    <div className="border-t border-slate-600 pt-4 flex justify-between items-baseline gap-3">
+                      <span className="text-sm font-semibold text-rose-300">Est. portal MDR ({String(appliedMdrPercent)}%)</span>
+                      <span className="text-lg font-bold tabular-nums text-rose-100">−{formatCurrency(recoveryMdrAmt)}</span>
+                    </div>
+                    <div className="border-t border-slate-600 pt-4 flex justify-between items-baseline gap-3">
+                      <span className="text-sm font-bold text-emerald-200 uppercase tracking-wide">Net to wallet</span>
+                      <span className="text-2xl font-black tabular-nums text-emerald-300">{formatCurrency(recoveryNetToWallet)}</span>
+                    </div>
+                    <div className="border-t border-slate-600 pt-4">
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Collected into</p>
+                      <p className="text-sm font-semibold text-slate-100 leading-snug">{collectIntoLabel}</p>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed pt-2">Net margin on this recovery (for P&amp;L): charges collected − MDR = <span className="text-slate-300 font-semibold tabular-nums">{formatCurrency(roundCurrency(collAmount - recoveryMdrAmt))}</span>.</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="hidden lg:flex flex-col items-center justify-center p-8 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/80 text-center text-sm text-slate-500 font-medium min-h-[200px]">
+                  Link a customer to see the live breakdown.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </Layout>
   );
