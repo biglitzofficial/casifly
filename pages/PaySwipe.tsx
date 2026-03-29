@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useERP } from '../context/ERPContext';
 import { useToast } from '../context/ToastContext';
 import { Layout } from '../components/Layout';
-import { LedgerEntry, TransactionType, Rates } from '../types';
+import { AccountType, LedgerEntry, TransactionType, Rates } from '../types';
 import { Card, CardContent, Input, Select, Button } from '../components/ui/Elements';
 import { safeParseFloat, roundCurrency } from '../lib/utils';
 import { ArrowRight, CheckCircle2, Search } from 'lucide-react';
@@ -49,9 +49,8 @@ export const PaySwipe: React.FC = () => {
   };
 
 
-  // Customer Lookup
-  const handlePhoneBlur = () => {
-    const digits = phone.replace(/\D/g, '');
+  /** Resolve against in-memory customer list (sync). Runs as soon as 10 digits are entered — not only on blur — so Swipe Recovery doesn’t feel “stuck” until you click away. */
+  const resolveCustomerFromDigits = (digits: string) => {
     if (digits.length !== 10) return;
     const found = customers.find(c => c.phone === digits);
     if (found) {
@@ -69,8 +68,47 @@ export const PaySwipe: React.FC = () => {
     setRecoveryErrors(p => ({ ...p, phone: '' }));
   };
 
+  const handlePhoneBlur = () => {
+    resolveCustomerFromDigits(phone.replace(/\D/g, ''));
+  };
+
+  const handlePhoneChange = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 10);
+    setPhone(digits);
+    if (digits.length < 10) {
+      setCustomerId(null);
+      setCustomerName('');
+      setIsNewCustomer(false);
+      setCommissionRates(DEFAULT_COMMISSION_RATES);
+      setErrors(p => ({ ...p, phone: '' }));
+      setRecoveryErrors(p => ({ ...p, phone: '' }));
+      return;
+    }
+    resolveCustomerFromDigits(digits);
+  };
+
   const selectedWallet = wallets.find(w => w.id === swipeWalletId);
   const selectedPG = selectedWallet?.pgs.find(p => p.name === pgName) || selectedWallet?.pgs[0];
+
+  /** Bank first, then cash, then wallets — labels make “store in bank” obvious. */
+  const collectIntoOptions = useMemo(() => {
+    const order: Record<string, number> = { Bank: 0, Cash: 1, Wallet: 2 };
+    const list = accounts.filter(
+      (a) => a.type === AccountType.ASSET && ['Bank', 'Cash', 'Wallet'].includes(a.category)
+    );
+    return [...list]
+      .sort((a, b) => {
+        const d = (order[a.category] ?? 99) - (order[b.category] ?? 99);
+        return d !== 0 ? d : a.name.localeCompare(b.name);
+      })
+      .map((a) => {
+        const prefix = a.category === 'Bank' ? 'Bank' : a.category === 'Cash' ? 'Cash' : 'Wallet';
+        return {
+          value: a.id,
+          label: `${prefix} — ${a.name}`,
+        };
+      });
+  }, [accounts]);
 
   // Auto-set initial PG
   useEffect(() => {
@@ -234,7 +272,7 @@ export const PaySwipe: React.FC = () => {
                       <Input 
                         label="Customer Phone" 
                         value={phone} 
-                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} 
+                        onChange={(e) => handlePhoneChange(e.target.value)} 
                         onBlur={handlePhoneBlur}
                         placeholder="10-digit phone"
                         error={errors.phone}
@@ -260,7 +298,7 @@ export const PaySwipe: React.FC = () => {
               <form onSubmit={handleRecovery} className="space-y-6">
                 <div className="bg-slate-50/80 p-5 rounded-xl border border-slate-200 space-y-4">
                   <div className="relative">
-                    <Input label="Customer Phone" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} onBlur={handlePhoneBlur} placeholder="10-digit phone" error={recoveryErrors.phone} maxLength={10} />
+                    <Input label="Customer Phone" value={phone} onChange={(e) => handlePhoneChange(e.target.value)} onBlur={handlePhoneBlur} placeholder="10-digit phone" error={recoveryErrors.phone} maxLength={10} />
                     <div className="absolute right-4 top-10 text-slate-400 pointer-events-none"><Search size={16}/></div>
                   </div>
                   {customerId && !isNewCustomer && (
@@ -326,7 +364,7 @@ export const PaySwipe: React.FC = () => {
                     <Input label="Charges Collected" type="number" value={collectionAmount} onChange={e => { setCollectionAmount(e.target.value); setRecoveryErrors(p => ({...p, collectionAmount: ''})); }} error={recoveryErrors.collectionAmount} />
                     <p className="text-xs text-slate-500 mt-1.5 font-medium">Calculated via {currentCommRate}%</p>
                   </div>
-                  <Select label="Collected Into" value={collectAccount} onChange={e => setCollectAccount(e.target.value)} options={accounts.filter(a => ['Bank', 'Cash', 'Wallet'].includes(a.category)).map(a => ({ label: a.name, value: a.id }))} />
+                  <Select label="Collected Into" value={collectAccount} onChange={e => setCollectAccount(e.target.value)} options={collectIntoOptions} />
                 </div>
                 
                 <div className="flex flex-wrap justify-end gap-4 text-xs font-medium">
