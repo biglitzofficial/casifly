@@ -3,7 +3,7 @@ import { useERP } from '../context/ERPContext';
 import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent } from '../components/ui/Elements';
 import { PageFilters, DateRange, FilterSection } from '../components/ui/PageFilters';
-import { Account, Transaction, TransactionType } from '../types';
+import { Transaction, TransactionType } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { TrendingUp, TrendingDown, ReceiptText, User, CreditCard, Wallet as WalletIcon, Scale, FileText, Download } from 'lucide-react';
 import { exportToCSV } from '../lib/export';
@@ -33,15 +33,9 @@ const CARD_NETWORK_OPTIONS = [
 
 const formatPct = (n: number) => `${n.toFixed(2)}%`;
 
-type BalanceSheetLine = { account: Account; balance: number };
-
-function balanceSheetRowsNonZero(rows: BalanceSheetLine[]): BalanceSheetLine[] {
-  return rows.filter((r) => Math.abs(r.balance) >= 0.01);
-}
-
 export const Reports: React.FC = () => {
   const { user } = useAuth();
-  const { transactions, wallets, customers, formatCurrency, generateBalanceSheet, generateProfitAndLoss, getAccountBalancesAsOf } = useERP();
+  const { transactions, wallets, customers, formatCurrency, generateProfitAndLoss, getAccountBalancesAsOf } = useERP();
   const [activeTab, setActiveTab] = useState<ReportTab>('overview');
   const [search, setSearch] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>({ from: '', to: '', preset: 'allTime' });
@@ -89,7 +83,6 @@ export const Reports: React.FC = () => {
     return result;
   }, [transactions, dateRange, search, cardNetworkFilter, customers, wallets]);
 
-  const balanceSheet = generateBalanceSheet();
   const plReport = generateProfitAndLoss();
 
   const walletBalanceCompare = useMemo(() => {
@@ -222,18 +215,6 @@ export const Reports: React.FC = () => {
     exportToCSV('profit-loss', ['Account', 'Amount'], rows);
   };
 
-  const exportBalanceSheet = () => {
-    const rows = [
-      ...balanceSheet.assets.map(a => ['Asset', a.account.name, formatCurrency(a.balance)]),
-      ['Asset', 'Total Assets', formatCurrency(balanceSheet.totalAssets)],
-      [],
-      ...balanceSheet.liabilities.map(l => ['Liability', l.account.name, formatCurrency(l.balance)]),
-      ...balanceSheet.equity.map(e => ['Equity', e.account.name, formatCurrency(e.balance)]),
-      ['Total', 'Liabilities + Equity', formatCurrency(balanceSheet.totalLiabilities + balanceSheet.totalEquity)],
-    ];
-    exportToCSV('balance-sheet', ['Type', 'Account', 'Balance'], rows);
-  };
-
   const exportWalletBalanceCompare = () => {
     const rows = walletBalanceCompare.map(w => [
       w.name,
@@ -304,7 +285,7 @@ export const Reports: React.FC = () => {
       <div className="flex gap-2 bg-white/90 backdrop-blur-md p-2 rounded-2xl border-2 border-slate-100 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.06)] overflow-x-auto">
         <TabButton id="overview" label="Performance" icon={TrendingUp} active={activeTab} onClick={setActiveTab} />
         <TabButton id="pl" label="Profit & Loss" icon={FileText} active={activeTab} onClick={setActiveTab} />
-        <TabButton id="balance-sheet" label="Balance Sheet" icon={Scale} active={activeTab} onClick={setActiveTab} />
+        <TabButton id="balance-sheet" label="Wallet balances" icon={Scale} active={activeTab} onClick={setActiveTab} />
         <TabButton id="transactions" label="Transaction P&L" icon={ReceiptText} active={activeTab} onClick={setActiveTab} />
         <TabButton id="card" label="By Network" icon={CreditCard} active={activeTab} onClick={setActiveTab} />
         <TabButton id="wallet" label="By Wallet" icon={WalletIcon} active={activeTab} onClick={setActiveTab} />
@@ -355,64 +336,9 @@ export const Reports: React.FC = () => {
         {activeTab === 'balance-sheet' && (
           <div className="grid grid-cols-1 gap-6">
             <Card>
-              <CardHeader title="Balance Sheet" subtitle="As of today" action={<Button size="sm" variant="outline" onClick={exportBalanceSheet}><Download size={14} /> Export CSV</Button>} />
-              <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-stretch">
-                {/* Assets column */}
-                <div className="flex flex-col">
-                  <h3 className="text-xl font-black text-slate-900 border-b-2 border-slate-900 pb-2 mb-4">Assets</h3>
-                  <DataTable 
-                    headers={['Account', 'Balance']}
-                    rows={balanceSheetRowsNonZero(balanceSheet.assets).map(a => [a.account.name, formatCurrency(a.balance)])}
-                    rightAlignColumns={[1]}
-                  />
-                  <div className="mt-auto pt-4">
-                    <div className="flex justify-between items-center p-4 bg-slate-900 text-white font-bold rounded-xl">
-                      <span>Total Assets</span>
-                      <span className="tabular-nums">{formatCurrency(balanceSheet.totalAssets)}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Liabilities & Equity column */}
-                <div className="flex flex-col">
-                  <h3 className="text-xl font-black text-slate-900 border-b-2 border-slate-900 pb-2 mb-4">Liabilities</h3>
-                  <DataTable 
-                    headers={['Account', 'Balance']}
-                    rows={balanceSheetRowsNonZero(balanceSheet.liabilities).map(l => [l.account.name, formatCurrency(l.balance)])}
-                    rightAlignColumns={[1]}
-                  />
-                  <div className="flex justify-between items-center p-4 bg-slate-100 text-slate-900 font-bold rounded-xl mt-2">
-                    <span>Total Liabilities</span>
-                    <span className="tabular-nums">{formatCurrency(balanceSheet.totalLiabilities)}</span>
-                  </div>
-
-                  {Math.abs(balanceSheet.totalEquity) >= 0.01 && (
-                    <div className="flex justify-between items-center p-4 bg-slate-50 text-slate-800 font-semibold rounded-xl mt-6 border border-slate-200">
-                      <span>Equity (owner + retained, incl. period P&amp;L)</span>
-                      <span className="tabular-nums">{formatCurrency(balanceSheet.totalEquity)}</span>
-                    </div>
-                  )}
-
-                  <div className="mt-auto pt-4">
-                    <div className="flex justify-between items-center p-4 bg-slate-900 text-white font-bold rounded-xl">
-                      <span>Total Liabilities & Equity</span>
-                      <span className="tabular-nums">{formatCurrency(balanceSheet.totalLiabilities + balanceSheet.totalEquity)}</span>
-                    </div>
-                  </div>
-                  
-                  {Math.abs(balanceSheet.totalAssets - (balanceSheet.totalLiabilities + balanceSheet.totalEquity)) > 0.01 && (
-                    <div className="p-4 bg-rose-100 text-rose-700 rounded-xl font-bold text-center border border-rose-200 mt-4">
-                      Warning: Balance Sheet is not in equilibrium!
-                    </div>
-                  )}
-                </div>
-              </div>
-            </Card>
-
-            <Card>
               <CardHeader
                 title="Wallet balances — two-day comparison"
-                subtitle="Each column is the ledger balance at the end of that day (completed transactions only), using the same rules as the main balance sheet."
+                subtitle="Ledger balance for each wallet at end of day (local date), using completed transactions only."
                 action={
                   <Button size="sm" variant="outline" onClick={exportWalletBalanceCompare}>
                     <Download size={14} /> Export CSV
