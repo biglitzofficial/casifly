@@ -3,7 +3,7 @@ import { useERP } from '../context/ERPContext';
 import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent } from '../components/ui/Elements';
 import { PageFilters, DateRange, FilterSection } from '../components/ui/PageFilters';
-import { Transaction, TransactionType } from '../types';
+import { Account, Transaction, TransactionType } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { TrendingUp, TrendingDown, ReceiptText, User, CreditCard, Wallet as WalletIcon, Scale, FileText, Download } from 'lucide-react';
 import { exportToCSV } from '../lib/export';
@@ -32,6 +32,12 @@ const CARD_NETWORK_OPTIONS = [
 ];
 
 const formatPct = (n: number) => `${n.toFixed(2)}%`;
+
+type BalanceSheetLine = { account: Account; balance: number };
+
+function balanceSheetRowsNonZero(rows: BalanceSheetLine[]): BalanceSheetLine[] {
+  return rows.filter((r) => Math.abs(r.balance) >= 0.01);
+}
 
 export const Reports: React.FC = () => {
   const { user } = useAuth();
@@ -356,7 +362,7 @@ export const Reports: React.FC = () => {
                   <h3 className="text-xl font-black text-slate-900 border-b-2 border-slate-900 pb-2 mb-4">Assets</h3>
                   <DataTable 
                     headers={['Account', 'Balance']}
-                    rows={balanceSheet.assets.map(a => [a.account.name, formatCurrency(a.balance)])}
+                    rows={balanceSheetRowsNonZero(balanceSheet.assets).map(a => [a.account.name, formatCurrency(a.balance)])}
                     rightAlignColumns={[1]}
                   />
                   <div className="mt-auto pt-4">
@@ -372,7 +378,7 @@ export const Reports: React.FC = () => {
                   <h3 className="text-xl font-black text-slate-900 border-b-2 border-slate-900 pb-2 mb-4">Liabilities</h3>
                   <DataTable 
                     headers={['Account', 'Balance']}
-                    rows={balanceSheet.liabilities.map(l => [l.account.name, formatCurrency(l.balance)])}
+                    rows={balanceSheetRowsNonZero(balanceSheet.liabilities).map(l => [l.account.name, formatCurrency(l.balance)])}
                     rightAlignColumns={[1]}
                   />
                   <div className="flex justify-between items-center p-4 bg-slate-100 text-slate-900 font-bold rounded-xl mt-2">
@@ -380,16 +386,12 @@ export const Reports: React.FC = () => {
                     <span className="tabular-nums">{formatCurrency(balanceSheet.totalLiabilities)}</span>
                   </div>
 
-                  <h3 className="text-xl font-black text-slate-900 border-b-2 border-slate-900 pb-2 mt-8 mb-4">Equity</h3>
-                  <DataTable 
-                    headers={['Account', 'Balance']}
-                    rows={balanceSheet.equity.map(e => [e.account.name, formatCurrency(e.balance)])}
-                    rightAlignColumns={[1]}
-                  />
-                  <div className="flex justify-between items-center p-4 bg-slate-100 text-slate-900 font-bold rounded-xl mt-2">
-                    <span>Total Equity</span>
-                    <span className="tabular-nums">{formatCurrency(balanceSheet.totalEquity)}</span>
-                  </div>
+                  {Math.abs(balanceSheet.totalEquity) >= 0.01 && (
+                    <div className="flex justify-between items-center p-4 bg-slate-50 text-slate-800 font-semibold rounded-xl mt-6 border border-slate-200">
+                      <span>Equity (owner + retained, incl. period P&amp;L)</span>
+                      <span className="tabular-nums">{formatCurrency(balanceSheet.totalEquity)}</span>
+                    </div>
+                  )}
 
                   <div className="mt-auto pt-4">
                     <div className="flex justify-between items-center p-4 bg-slate-900 text-white font-bold rounded-xl">
