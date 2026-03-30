@@ -89,7 +89,11 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         api.getWallets(),
         api.getTransactions(),
       ]);
-      setAccounts((accs as any[]).map(a => ({ id: a.id, name: a.name, type: a.type, category: a.category, balance: a.balance ?? 0 })));
+      const mapped = (accs as any[]).map(a => ({ id: a.id, name: a.name, type: a.type, category: a.category, balance: a.balance ?? 0 }));
+      const ids = new Set(mapped.map((a) => a.id));
+      const missingCoa = INITIAL_ACCOUNTS.filter((a) => !ids.has(a.id));
+      /** Seed banks (A002/A003) may be store-scoped in DB while UI merges full COA — without this, Pay & Swipe posts to bank IDs fail validation and never hit the ledger. */
+      setAccounts(missingCoa.length ? [...mapped, ...missingCoa] : mapped);
       setCustomers((custs as any[]).map(c => ({ id: c.id, name: c.name, phone: c.phone, commissionRates: c.commissionRates, ledgerAccountId: c.ledgerAccountId, joinedAt: c.joinedAt, storeId: c.storeId })));
       setWallets((wals as any[]).map(w => ({ id: w.id, name: w.name, ledgerAccountId: w.ledgerAccountId, pgs: w.pgs, storeId: w.storeId })));
       setTransactions((txns as any[]).map(t => ({ id: t.id, date: t.date, description: t.description, type: t.type, entries: t.entries, status: t.status ?? 'COMPLETED', metadata: t.metadata, referenceId: t.referenceId })));

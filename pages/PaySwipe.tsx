@@ -206,13 +206,19 @@ export const PaySwipe: React.FC = () => {
       { accountId: paySourceId, debit: 0, credit: amount }
     ];
     setErrors({});
-    postTransaction(
-      `Advance Pay: ${customerName.trim()}`, 
-      TransactionType.PAY_SWIPE, 
+    const pending = postTransaction(
+      `Advance Pay: ${customerName.trim()}`,
+      TransactionType.PAY_SWIPE,
       entries,
       { customerId: finalId || undefined }
     );
-    toast.success("Advance recorded successfully!");
+    if (!pending) return;
+    try {
+      await pending;
+    } catch {
+      return;
+    }
+    toast.success('Advance recorded successfully!');
     resetForm();
   };
 
@@ -241,7 +247,7 @@ export const PaySwipe: React.FC = () => {
     return Object.keys(err).length === 0;
   };
 
-  const handleRecovery = (e: React.FormEvent) => {
+  const handleRecovery = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateRecovery()) return;
     const wallet = wallets.find(w => w.id === swipeWalletId);
@@ -262,19 +268,25 @@ export const PaySwipe: React.FC = () => {
       { accountId: wallet.ledgerAccountId, debit: netToWallet, credit: 0 },
       { accountId: 'A006', debit: 0, credit: recoveryAmt },
       { accountId: 'E001', debit: mdr, credit: 0 },
-      
+
       // 2. Charges Collection (Bank UP, Income UP)
       { accountId: collectAccount, debit: collAmount, credit: 0 },
       { accountId: 'I001', debit: 0, credit: collAmount }
     ];
 
-    postTransaction(
+    const pending = postTransaction(
       `Recovery: ${customerName} (${cardType.toUpperCase()})`,
       TransactionType.PAY_SWIPE,
       entries,
       { customerId: customerId || undefined, walletId: wallet.id, cardType: cardType }
     );
-    toast.success("Recovery recorded successfully!");
+    if (!pending) return;
+    try {
+      await pending;
+    } catch {
+      return;
+    }
+    toast.success('Recovery recorded successfully!');
     resetRecoveryForm();
   };
 

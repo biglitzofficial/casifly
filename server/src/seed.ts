@@ -4,11 +4,11 @@ import { rawDb } from './db.js';
 const MASTER_EMAIL = 'admin@casifly.com';
 const MASTER_PASSWORD = 'Admin@123';
 
-const DEFAULT_STORE_ID = 'P0001'; // Main Store – seed banks belong to first store only
 const INITIAL_ACCOUNTS = [
   { id: 'A001', name: 'Cash on Hand', type: 'ASSET', category: 'Cash', balance: 500000, store_id: null },
-  { id: 'A002', name: 'HDFC Bank Main', type: 'ASSET', category: 'Bank', balance: 1200000, store_id: DEFAULT_STORE_ID },
-  { id: 'A003', name: 'ICICI Bank Ops', type: 'ASSET', category: 'Bank', balance: 800000, store_id: DEFAULT_STORE_ID },
+  /** Shared template banks so all stores can post Pay & Swipe recoveries “into bank” without missing COA rows. */
+  { id: 'A002', name: 'HDFC Bank Main', type: 'ASSET', category: 'Bank', balance: 1200000, store_id: null },
+  { id: 'A003', name: 'ICICI Bank Ops', type: 'ASSET', category: 'Bank', balance: 800000, store_id: null },
   { id: 'A004', name: 'Wallet A (Razorpay)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
   { id: 'A005', name: 'Wallet B (Paytm)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
   { id: 'A006', name: 'Customer Receivables', type: 'ASSET', category: 'Customer', balance: 0, store_id: null },

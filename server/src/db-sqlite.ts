@@ -22,6 +22,8 @@ sqlite.exec(`CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, name TEXT
       sqlite.exec('ALTER TABLE accounts ADD COLUMN store_id TEXT');
       sqlite.exec(`UPDATE accounts SET store_id = 'P0001' WHERE category IN ('Bank','Cash') AND id != 'A001' AND (store_id IS NULL OR store_id = '')`);
     }
+    /** Template seed banks must be visible to every store (same as cash/wallets); otherwise Pay & Swipe “collected into bank” posts fail client validation for non-P0001 users. */
+    sqlite.prepare(`UPDATE accounts SET store_id = NULL WHERE id IN ('A002','A003')`).run();
   } catch (_) {}
 })();
 sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_accounts_store ON accounts(store_id)`);
@@ -218,11 +220,10 @@ export const sqliteDb = {
   },
 
   async resetErpData() {
-    const DEFAULT_STORE_ID = 'P0001';
     const INITIAL_ACCOUNTS = [
       { id: 'A001', name: 'Cash on Hand', type: 'ASSET', category: 'Cash', balance: 500000, store_id: null },
-      { id: 'A002', name: 'HDFC Bank Main', type: 'ASSET', category: 'Bank', balance: 1200000, store_id: DEFAULT_STORE_ID },
-      { id: 'A003', name: 'ICICI Bank Ops', type: 'ASSET', category: 'Bank', balance: 800000, store_id: DEFAULT_STORE_ID },
+      { id: 'A002', name: 'HDFC Bank Main', type: 'ASSET', category: 'Bank', balance: 1200000, store_id: null },
+      { id: 'A003', name: 'ICICI Bank Ops', type: 'ASSET', category: 'Bank', balance: 800000, store_id: null },
       { id: 'A004', name: 'Wallet A (Razorpay)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
       { id: 'A005', name: 'Wallet B (Paytm)', type: 'ASSET', category: 'Wallet', balance: 0, store_id: null },
       { id: 'A006', name: 'Customer Receivables', type: 'ASSET', category: 'Customer', balance: 0, store_id: null },
