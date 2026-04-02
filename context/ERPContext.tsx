@@ -31,6 +31,7 @@ interface ERPContextType {
   deleteWallet: (id: string) => void;
   addWalletPG: (walletId: string, pgConfig: PGConfig) => void;
   updateWalletPG: (walletId: string, oldPgName: string, pgConfig: PGConfig) => void;
+  removeWalletPG: (walletId: string, pgName: string) => void;
   addAccount: (data: { name: string; category: 'Bank' | 'Cash' }) => void;
   /** Dr wallet ledger / Cr Q002 — use for store-owned wallets (e.g. after create or corrections). */
   recordWalletOpeningBalance: (walletId: string, amount: number) => void | Promise<void>;
@@ -422,6 +423,26 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }));
   };
 
+  const removeWalletPG = (walletId: string, pgName: string) => {
+    const wallet = allWallets.find((w) => w.id === walletId);
+    if (!wallet) return;
+    if (wallet.pgs.length <= 1) {
+      toast.error('A wallet must keep at least one payment gateway');
+      return;
+    }
+    if (!wallet.pgs.some((pg) => pg.name === pgName)) return;
+    if (USE_API) {
+      api.removeWalletPG(walletId, pgName).then(() => refreshFromApi()).catch((e: any) => toast.error(e?.message || 'Remove failed'));
+      return;
+    }
+    setWallets(prev => prev.map(w => {
+      if (w.id !== walletId) return w;
+      const next = w.pgs.filter((pg) => pg.name !== pgName);
+      if (next.length === 0) return w;
+      return { ...w, pgs: next };
+    }));
+  };
+
   const addAccount = (data: { name: string; category: 'Bank' | 'Cash' }) => {
     if (USE_API) {
       api.addAccount(data)
@@ -678,6 +699,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       deleteWallet,
       addWalletPG,
       updateWalletPG,
+      removeWalletPG,
       addAccount,
       recordWalletOpeningBalance,
       generateBalanceSheet,

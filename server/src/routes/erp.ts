@@ -266,7 +266,7 @@ erpRouter.delete('/wallets/:id', async (req, res) => {
 erpRouter.patch('/wallets/:id/pgs', async (req, res) => {
   const user = (req as any).user;
   const { id } = req.params;
-  const { action, pgConfig, oldPgName } = req.body;
+  const { action, pgConfig, oldPgName, pgName } = req.body;
   const w = await db.getWallet(id);
   if (!w) {
     res.status(404).json({ error: 'Wallet not found' });
@@ -278,6 +278,20 @@ erpRouter.patch('/wallets/:id/pgs', async (req, res) => {
     pgs.push(pgConfig);
   } else if (action === 'update' && oldPgName && pgConfig) {
     pgs = pgs.map((pg: any) => pg.name === oldPgName ? pgConfig : pg);
+  } else if (action === 'remove' && pgName && typeof pgName === 'string') {
+    const next = pgs.filter((pg: any) => pg.name !== pgName.trim());
+    if (next.length === 0) {
+      res.status(400).json({ error: 'A wallet must keep at least one payment gateway' });
+      return;
+    }
+    if (next.length === pgs.length) {
+      res.status(404).json({ error: 'Payment gateway not found' });
+      return;
+    }
+    pgs = next;
+  } else {
+    res.status(400).json({ error: 'Invalid PG action or missing fields' });
+    return;
   }
   await db.updateWallet(id, { pgs });
   res.json({ id, name: w.name, ledgerAccountId: w.ledger_account_id, pgs, storeId: w.store_id || undefined });

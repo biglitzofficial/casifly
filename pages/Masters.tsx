@@ -651,7 +651,8 @@ const CustomersView = () => {
 const WalletsView = () => {
   const { user } = useAuth();
   const toast = useToast();
-  const { wallets, updateWallet, addWallet, addWalletPG, updateWalletPG, getAccountBalance, formatCurrency, recordWalletOpeningBalance } = useERP();
+  const { confirm } = useConfirm();
+  const { wallets, updateWallet, addWallet, addWalletPG, updateWalletPG, removeWalletPG, getAccountBalance, formatCurrency, recordWalletOpeningBalance } = useERP();
   const isStoreAdmin = user?.role === 'product_admin';
   /** Global wallets (no storeId) and this store's wallets — not another store's. */
   const canMutateWallet = (w: Wallet) => {
@@ -778,6 +779,19 @@ const WalletsView = () => {
   const filteredWallets = wallets.filter(w =>
     w.name.toLowerCase().includes(search.toLowerCase()) || w.ledgerAccountId.toLowerCase().includes(search.toLowerCase())
   );
+
+  const handleRemovePG = async (w: Wallet, pgName: string) => {
+    if (!canMutateWallet(w) || w.pgs.length <= 1) return;
+    const ok = await confirm({
+      title: 'Remove payment gateway',
+      message: `Remove "${pgName}" from ${w.name}? This cannot be undone.`,
+      confirmText: 'Remove',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    removeWalletPG(w.id, pgName);
+    toast.success('Payment gateway removed');
+  };
 
   return (
     <div className="space-y-6">
@@ -968,10 +982,22 @@ const WalletsView = () => {
                     <td className="p-4">
                       <div className="flex flex-wrap gap-2 items-center">
                         {w.pgs.map(pg => (
-                          <span key={pg.name} className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 dark:bg-slate-700 rounded text-xs font-medium group">
+                          <span key={pg.name} className="inline-flex items-center gap-0.5 px-2 py-1 bg-slate-100 dark:bg-slate-700 rounded text-xs font-medium group">
                             {pg.name}
                             {canMutateWallet(w) ? (
-                              <button type="button" onClick={() => openPGForm(w.id, pg)} className="p-0.5 text-indigo-600 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 rounded opacity-70 group-hover:opacity-100" title="Edit PG"><Edit2 size={12}/></button>
+                              <>
+                                <button type="button" onClick={() => openPGForm(w.id, pg)} className="p-0.5 text-indigo-600 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 rounded opacity-70 group-hover:opacity-100" title="Edit PG"><Edit2 size={12}/></button>
+                                {w.pgs.length > 1 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemovePG(w, pg.name)}
+                                    className="p-0.5 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded opacity-70 group-hover:opacity-100"
+                                    title="Remove PG"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                ) : null}
+                              </>
                             ) : null}
                           </span>
                         ))}
@@ -1017,7 +1043,19 @@ const WalletsView = () => {
                     <div className="flex justify-between items-center mb-2">
                       <p className="font-bold text-slate-700 dark:text-slate-300">{pg.name}</p>
                       {canMutateWallet(w) ? (
-                        <button type="button" onClick={() => openPGForm(w.id, pg)} className="text-indigo-600 hover:text-indigo-800 dark:hover:text-indigo-300 p-1 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"><Edit2 size={14}/></button>
+                        <div className="flex items-center gap-0.5">
+                          <button type="button" onClick={() => openPGForm(w.id, pg)} className="text-indigo-600 hover:text-indigo-800 dark:hover:text-indigo-300 p-1 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors" title="Edit PG"><Edit2 size={14}/></button>
+                          {w.pgs.length > 1 ? (
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePG(w, pg.name)}
+                              className="text-rose-600 hover:text-rose-800 dark:hover:text-rose-400 p-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-colors"
+                              title="Remove PG"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
                     <div className="grid grid-cols-4 gap-2 text-center text-xs">

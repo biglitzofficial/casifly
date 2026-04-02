@@ -127,6 +127,10 @@ export const api = {
     return fetchApi<unknown>(`/erp/wallets/${walletId}/pgs`, { method: 'PATCH', body: JSON.stringify({ action: 'update', oldPgName, pgConfig }) });
   },
 
+  async removeWalletPG(walletId: string, pgName: string) {
+    return fetchApi<unknown>(`/erp/wallets/${walletId}/pgs`, { method: 'PATCH', body: JSON.stringify({ action: 'remove', pgName }) });
+  },
+
   async getTransactions() {
     return fetchApi<unknown[]>('/erp/transactions');
   },
