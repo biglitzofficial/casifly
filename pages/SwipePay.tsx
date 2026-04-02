@@ -63,11 +63,15 @@ export const SwipePay: React.FC = () => {
 
   // --- Logic ---
   const selectedWallet = wallets.find(w => w.id === swipeWalletId);
+  /** When wallet changes, keep current PG if it exists on the new wallet; else first PG. */
   useEffect(() => {
-    if (selectedWallet && selectedWallet.pgs.length > 0) {
-      setPgName(selectedWallet.pgs[0].name);
+    const w = wallets.find((x) => x.id === swipeWalletId);
+    if (!w?.pgs?.length) {
+      setPgName('');
+      return;
     }
-  }, [swipeWalletId, selectedWallet]);
+    setPgName((prev) => (prev && w.pgs.some((p) => p.name === prev) ? prev : w.pgs[0].name));
+  }, [swipeWalletId, wallets]);
 
   useEffect(() => {
     const rate = commissionRates[cardType as keyof Rates] ?? '0';
@@ -170,6 +174,10 @@ export const SwipePay: React.FC = () => {
     if (isNaN(rateVal) || rateVal < 0 || rateVal > 100) err.currentServiceRate = 'Rate must be between 0 and 100%';
     setStep1Errors(err);
     if (Object.keys(err).length > 0 || !selectedWallet || !customerId) return;
+    if (!selectedWallet.pgs?.length || !selectedPG) {
+      toast.error('This wallet has no payment gateway. Add one in Masters → Wallets.');
+      return;
+    }
 
     setInflowLoading(true);
     try {
@@ -196,7 +204,12 @@ export const SwipePay: React.FC = () => {
         `Swipe Inflow: ${customerName} (${cardType.toUpperCase()})`,
         TransactionType.SWIPE_PAY,
         inflowEntries,
-        { customerId: customerId || undefined, walletId: selectedWallet.id, cardType: cardType }
+        {
+          customerId: customerId || undefined,
+          walletId: selectedWallet.id,
+          cardType: cardType,
+          pgName: selectedPG?.name,
+        }
       );
       if (p && typeof (p as Promise<unknown>).then === 'function') await p;
 
@@ -397,15 +410,26 @@ export const SwipePay: React.FC = () => {
                   {/* Transaction Details (Only if customer is identified/created) */}
                   {isPhoneLocked && !isNewCustomer && (
                     <form onSubmit={handleStep1Submit} className="space-y-6 animate-fade-in">
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <Select label="Inflow Wallet" value={swipeWalletId} onChange={e => setSwipeWalletId(e.target.value)} options={wallets.map(w => ({ label: w.name, value: w.id }))} />
+                        <Select
+                          label="Payment gateway"
+                          value={pgName}
+                          onChange={(e) => setPgName(e.target.value)}
+                          options={
+                            (selectedWallet?.pgs?.length ?? 0) > 0
+                              ? selectedWallet!.pgs.map((p) => ({ label: p.name, value: p.name }))
+                              : [{ label: 'Add a PG in Masters → Wallets', value: '' }]
+                          }
+                          disabled={!selectedWallet?.pgs?.length}
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <Select label="Card Type" value={cardType} onChange={e => setCardType(e.target.value)} options={[{label:'Visa',value:'visa'},{label:'Master',value:'master'},{label:'Amex',value:'amex'},{label:'Rupay',value:'rupay'}]} />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
                         <Input label="Swipe Amount (₹)" type="number" className="text-xl font-bold" value={swipeAmount} onChange={e => { setSwipeAmount(e.target.value); setStep1Errors(p => ({...p, swipeAmount: ''})); }} error={step1Errors.swipeAmount} placeholder="0" />
-                        <Input label="Applied Rate %" type="number" step="0.1" value={currentServiceRate} onChange={e => { setCurrentServiceRate(e.target.value); setStep1Errors(p => ({...p, currentServiceRate: ''})); }} error={step1Errors.currentServiceRate} />
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <Input label="Applied Rate %" type="number" step="0.1" value={currentServiceRate} onChange={e => { setCurrentServiceRate(e.target.value); setStep1Errors(p => ({...p, currentServiceRate: ''})); }} error={step1Errors.currentServiceRate} />
                         <Input label="Wallet PG Charge %" type="number" step="0.1" value={appliedPortalRate} onChange={e => setAppliedPortalRate(e.target.value)} placeholder="e.g. 0.5" title="Payment gateway MDR % – pre-filled from wallet, editable for overrides" />
                       </div>
                       <Button type="submit" size="lg" className="w-full h-14 text-lg" loading={inflowLoading}>Process Inflow <ArrowRight size={20}/></Button>

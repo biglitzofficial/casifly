@@ -96,6 +96,8 @@ export interface LedgerEntry {
 export interface TransactionMetadata {
   customerId?: string;
   walletId?: string;
+  /** Swipe inflow: which wallet PG (portal) was used — matches Masters wallet PG name. */
+  pgName?: string;
   cardType?: string;
   relatedTransactionId?: string;
   /** Swipe outflow: ledger id of the Swipe Inflow tx whose margin (L003) to recognise into I001. */
