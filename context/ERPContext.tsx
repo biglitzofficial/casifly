@@ -33,7 +33,10 @@ interface ERPContextType {
   updateWalletPG: (walletId: string, oldPgName: string, pgConfig: PGConfig) => void;
   removeWalletPG: (walletId: string, pgName: string) => void;
   addAccount: (data: { name: string; category: 'Bank' | 'Cash' }) => void;
-  /** Dr wallet ledger / Cr Q002 — use for store-owned wallets (e.g. after create or corrections). */
+  /**
+   * Opening / retained-earnings adjustment on wallet ledger.
+   * Positive: Dr wallet / Cr Q002. Negative: Dr Q002 / Cr wallet (reduces opening).
+   */
   recordWalletOpeningBalance: (walletId: string, amount: number) => void | Promise<void>;
 
   // Getters
@@ -352,18 +355,29 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const recordWalletOpeningBalance = (walletId: string, amount: number) => {
     const amt = roundCurrency(amount);
-    if (amt <= 0) {
-      toast.error('Enter an opening balance greater than zero');
+    if (Math.abs(amt) < 0.005) {
+      toast.error('Enter a non-zero amount (use negative to reduce opening)');
       return;
     }
     const wallet = allWallets.find((w) => w.id === walletId);
     if (!wallet) return;
-    const desc = `Opening balance: ${wallet.name}`;
-    const entries: LedgerEntry[] = [
-      { accountId: wallet.ledgerAccountId, debit: amt, credit: 0 },
-      { accountId: 'Q002', debit: 0, credit: amt },
-    ];
     const meta: TransactionMetadata = { storeId: user?.productId ?? undefined, walletId: wallet.id };
+    let entries: LedgerEntry[];
+    let desc: string;
+    if (amt > 0) {
+      desc = `Opening balance (+): ${wallet.name}`;
+      entries = [
+        { accountId: wallet.ledgerAccountId, debit: amt, credit: 0 },
+        { accountId: 'Q002', debit: 0, credit: amt },
+      ];
+    } else {
+      const absAmt = Math.abs(amt);
+      desc = `Opening balance (−): ${wallet.name}`;
+      entries = [
+        { accountId: 'Q002', debit: absAmt, credit: 0 },
+        { accountId: wallet.ledgerAccountId, debit: 0, credit: absAmt },
+      ];
+    }
     const p = postTransaction(desc, TransactionType.JOURNAL, entries, meta);
     if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => {});
   };

@@ -652,7 +652,7 @@ const WalletsView = () => {
   const { user } = useAuth();
   const toast = useToast();
   const { confirm } = useConfirm();
-  const { wallets, updateWallet, addWallet, addWalletPG, updateWalletPG, removeWalletPG, getAccountBalance, formatCurrency, recordWalletOpeningBalance } = useERP();
+  const { wallets, updateWallet, deleteWallet, addWallet, addWalletPG, updateWalletPG, removeWalletPG, getAccountBalance, formatCurrency, recordWalletOpeningBalance } = useERP();
   const isStoreAdmin = user?.role === 'product_admin';
   /** Global wallets (no storeId) and this store's wallets — not another store's. */
   const canMutateWallet = (w: Wallet) => {
@@ -660,6 +660,9 @@ const WalletsView = () => {
     if (!w.storeId) return true;
     return w.storeId === user.productId;
   };
+  /** Delete only store-created wallets — not shared (global) ones. */
+  const canDeleteWallet = (w: Wallet) =>
+    isStoreAdmin && !!user?.productId && !!w.storeId && w.storeId === user.productId;
 
   const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -779,6 +782,23 @@ const WalletsView = () => {
   const filteredWallets = wallets.filter(w =>
     w.name.toLowerCase().includes(search.toLowerCase()) || w.ledgerAccountId.toLowerCase().includes(search.toLowerCase())
   );
+
+  const handleDeleteWallet = async (w: Wallet) => {
+    if (!canDeleteWallet(w)) return;
+    const ok = await confirm({
+      title: 'Delete wallet',
+      message: `Permanently delete "${w.name}" and its ledger ${w.ledgerAccountId}? This cannot be undone. Past transactions may still reference this ledger ID in history.`,
+      confirmText: 'Delete wallet',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    deleteWallet(w.id);
+    if (editingId === w.id) {
+      setEditingId(null);
+      setOpeningExtraAmount('');
+    }
+    toast.success('Wallet deleted');
+  };
 
   const handleRemovePG = async (w: Wallet, pgName: string) => {
     if (!canMutateWallet(w) || w.pgs.length <= 1) return;
@@ -924,16 +944,21 @@ const WalletsView = () => {
                 if (!ew || !canMutateWallet(ew)) return null;
                 return (
                   <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-600 space-y-3">
-                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">Opening balance entry</p>
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">Opening balance adjustment</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Posts a journal: debit this wallet, credit retained earnings. Use for additional opening or corrections (you can run multiple times).
+                      <strong>Positive</strong> amount: debit wallet / credit retained earnings (Q002) — increases opening.{' '}
+                      <strong>Negative</strong> (e.g. −5000): credit wallet / debit Q002 — reduces opening. You can post multiple times.
+                    </p>
+                    <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                      Current ledger balance: {formatCurrency(getAccountBalance(ew.ledgerAccountId))}
                     </p>
                     <Input
-                      label="Amount (₹)"
+                      label="Adjustment (₹)"
                       type="number"
+                      step="any"
                       value={openingExtraAmount}
                       onChange={(e) => setOpeningExtraAmount(e.target.value)}
-                      placeholder="e.g. 50000"
+                      placeholder="e.g. 50000 or −2500"
                     />
                     <Button
                       type="button"
@@ -941,17 +966,33 @@ const WalletsView = () => {
                       className="w-full"
                       onClick={() => {
                         const v = safeParseFloat(openingExtraAmount);
-                        if (isNaN(v) || v <= 0) {
-                          toast.error('Enter a positive amount');
+                        if (isNaN(v) || Math.abs(v) < 0.005) {
+                          toast.error('Enter a non-zero amount (negative allowed)');
                           return;
                         }
-                        recordWalletOpeningBalance(editingId, v);
+                        recordWalletOpeningBalance(ew.id, v);
                         setOpeningExtraAmount('');
-                        toast.success('Opening balance posted');
+                        toast.success('Opening adjustment posted');
                       }}
                     >
-                      Post opening entry
+                      Post adjustment
                     </Button>
+                    {canDeleteWallet(ew) ? (
+                      <div className="pt-4 border-t border-slate-200 dark:border-slate-600">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full border-rose-200 text-rose-700 hover:bg-rose-50 dark:border-rose-900/50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                          onClick={() => handleDeleteWallet(ew)}
+                        >
+                          <Trash2 size={16} className="inline mr-2" />
+                          Delete this wallet
+                        </Button>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">
+                          Only store-owned wallets can be deleted here. Shared wallets are removed by Master Admin.
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })()}
@@ -1031,7 +1072,10 @@ const WalletsView = () => {
                     {canMutateWallet(w) ? (
                       <>
                         <Button size="sm" variant="outline" onClick={() => openPGForm(w.id)}><Plus size={14}/> Add PG</Button>
-                        <button type="button" onClick={() => handleEditWallet(w)} className="p-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors" title="Edit"><Edit2 size={14}/></button>
+                        <button type="button" onClick={() => handleEditWallet(w)} className="p-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors" title="Edit wallet"><Edit2 size={14}/></button>
+                        {canDeleteWallet(w) ? (
+                          <button type="button" onClick={() => handleDeleteWallet(w)} className="p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors" title="Delete wallet"><Trash2 size={14}/></button>
+                        ) : null}
                       </>
                     ) : null}
                   </div>

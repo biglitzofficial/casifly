@@ -37,6 +37,27 @@ function assertCanWriteWallet(user: any, w: { store_id?: string | null }, res: R
   return false;
 }
 
+/** Store admins may delete only their store-owned wallets — not shared (global) wallets. */
+function assertCanDeleteWallet(user: any, w: { store_id?: string | null }, res: Response): boolean {
+  if (user.role === 'master_admin') return true;
+  if (user.role === 'product_admin') {
+    const pid = user.productId ?? '';
+    if (!pid) {
+      res.status(403).json({ error: 'Store context required' });
+      return false;
+    }
+    if (walletStoreId(w) !== pid) {
+      res.status(403).json({
+        error: 'You can only delete wallets owned by your store. Shared (global) wallets must be removed by Master Admin.',
+      });
+      return false;
+    }
+    return true;
+  }
+  res.status(403).json({ error: 'Not allowed' });
+  return false;
+}
+
 erpRouter.get('/accounts', async (req, res) => {
   const user = (req as any).user;
   const storeId = user.productId ?? undefined;
@@ -258,7 +279,7 @@ erpRouter.delete('/wallets/:id', async (req, res) => {
     res.status(404).json({ error: 'Wallet not found' });
     return;
   }
-  if (!assertCanWriteWallet(user, w, res)) return;
+  if (!assertCanDeleteWallet(user, w, res)) return;
   await db.deleteWallet(id);
   res.json({ ok: true });
 });
