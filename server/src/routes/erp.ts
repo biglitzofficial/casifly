@@ -15,15 +15,23 @@ function walletStoreId(w: { store_id?: string | null } | null): string | null {
   return w.store_id ?? null;
 }
 
-/** Store admins may only change wallets owned by their product. */
+/**
+ * Store admins may change global (shared) wallets or wallets scoped to their store.
+ * They cannot change another store's private wallets.
+ */
 function assertCanWriteWallet(user: any, w: { store_id?: string | null }, res: Response): boolean {
   if (user.role === 'master_admin') return true;
   if (user.role === 'product_admin') {
-    if (walletStoreId(w) !== (user.productId ?? '')) {
-      res.status(403).json({ error: 'You can only change wallets owned by your store' });
+    const pid = user.productId ?? '';
+    if (!pid) {
+      res.status(403).json({ error: 'Store context required' });
       return false;
     }
-    return true;
+    const wid = walletStoreId(w);
+    if (wid === null || wid === '') return true;
+    if (wid === pid) return true;
+    res.status(403).json({ error: "You can't change another store's wallets" });
+    return false;
   }
   res.status(403).json({ error: 'Not allowed' });
   return false;

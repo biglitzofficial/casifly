@@ -653,8 +653,12 @@ const WalletsView = () => {
   const toast = useToast();
   const { wallets, updateWallet, addWallet, addWalletPG, updateWalletPG, getAccountBalance, formatCurrency, recordWalletOpeningBalance } = useERP();
   const isStoreAdmin = user?.role === 'product_admin';
-  const canMutateWallet = (w: Wallet) =>
-    isStoreAdmin && !!user?.productId && w.storeId === user.productId;
+  /** Global wallets (no storeId) and this store's wallets — not another store's. */
+  const canMutateWallet = (w: Wallet) => {
+    if (!isStoreAdmin || !user?.productId) return false;
+    if (!w.storeId) return true;
+    return w.storeId === user.productId;
+  };
 
   const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -814,7 +818,7 @@ const WalletsView = () => {
         )}
         <p className="text-sm text-slate-500 dark:text-slate-400 max-w-xl">
           {isStoreAdmin
-            ? 'You can add wallets for your store, rename them, configure payment gateways, and set opening balances. Shared (global) wallets are view-only here — contact Master Admin to change them.'
+            ? 'You can add store-owned wallets and edit any wallet you see here — including shared (global) ones — name, payment gateways, and opening balance entries. Editing a shared wallet\'s PG settings affects all stores that use it. You cannot edit another store\'s private wallets.'
             : 'View wallets and balances. Only the store admin can add or edit wallets.'}
         </p>
       </div>
