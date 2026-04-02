@@ -37,7 +37,10 @@ function assertCanWriteWallet(user: any, w: { store_id?: string | null }, res: R
   return false;
 }
 
-/** Store admins may delete only their store-owned wallets — not shared (global) wallets. */
+/**
+ * Store admins may delete wallets they are allowed to see: global/shared (no store_id) or their store's.
+ * They cannot delete another store's private wallets (those are not in GET /wallets for them).
+ */
 function assertCanDeleteWallet(user: any, w: { store_id?: string | null }, res: Response): boolean {
   if (user.role === 'master_admin') return true;
   if (user.role === 'product_admin') {
@@ -46,13 +49,11 @@ function assertCanDeleteWallet(user: any, w: { store_id?: string | null }, res: 
       res.status(403).json({ error: 'Store context required' });
       return false;
     }
-    if (walletStoreId(w) !== pid) {
-      res.status(403).json({
-        error: 'You can only delete wallets owned by your store. Shared (global) wallets must be removed by Master Admin.',
-      });
-      return false;
-    }
-    return true;
+    const wid = walletStoreId(w);
+    if (wid === null || wid === '') return true;
+    if (wid === pid) return true;
+    res.status(403).json({ error: "You can't delete another store's wallets" });
+    return false;
   }
   res.status(403).json({ error: 'Not allowed' });
   return false;

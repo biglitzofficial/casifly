@@ -654,15 +654,14 @@ const WalletsView = () => {
   const { confirm } = useConfirm();
   const { wallets, updateWallet, deleteWallet, addWallet, addWalletPG, updateWalletPG, removeWalletPG, getAccountBalance, formatCurrency, recordWalletOpeningBalance } = useERP();
   const isStoreAdmin = user?.role === 'product_admin';
-  /** Global wallets (no storeId) and this store's wallets — not another store's. */
+  const isMasterAdmin = user?.role === 'master_admin';
+  /** Same wallets as GET /wallets: global + this store's. Master Admin can change any wallet in the system. */
   const canMutateWallet = (w: Wallet) => {
+    if (isMasterAdmin) return true;
     if (!isStoreAdmin || !user?.productId) return false;
     if (!w.storeId) return true;
     return w.storeId === user.productId;
   };
-  /** Delete only store-created wallets — not shared (global) ones. */
-  const canDeleteWallet = (w: Wallet) =>
-    isStoreAdmin && !!user?.productId && !!w.storeId && w.storeId === user.productId;
 
   const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -784,7 +783,7 @@ const WalletsView = () => {
   );
 
   const handleDeleteWallet = async (w: Wallet) => {
-    if (!canDeleteWallet(w)) return;
+    if (!canMutateWallet(w)) return;
     const ok = await confirm({
       title: 'Delete wallet',
       message: `Permanently delete "${w.name}" and its ledger ${w.ledgerAccountId}? This cannot be undone. Past transactions may still reference this ledger ID in history.`,
@@ -939,7 +938,7 @@ const WalletsView = () => {
                 <Input label="Wallet Name" value={editWalletName} onChange={e => { setEditWalletName(e.target.value); setEditWalletError(''); }} error={editWalletError} placeholder="Wallet name" />
                 <Button type="submit" className="w-full">Save name</Button>
               </form>
-              {isStoreAdmin && (() => {
+              {(() => {
                 const ew = wallets.find((x) => x.id === editingId);
                 if (!ew || !canMutateWallet(ew)) return null;
                 return (
@@ -977,22 +976,20 @@ const WalletsView = () => {
                     >
                       Post adjustment
                     </Button>
-                    {canDeleteWallet(ew) ? (
-                      <div className="pt-4 border-t border-slate-200 dark:border-slate-600">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="w-full border-rose-200 text-rose-700 hover:bg-rose-50 dark:border-rose-900/50 dark:text-rose-400 dark:hover:bg-rose-950/40"
-                          onClick={() => handleDeleteWallet(ew)}
-                        >
-                          <Trash2 size={16} className="inline mr-2" />
-                          Delete this wallet
-                        </Button>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">
-                          Only store-owned wallets can be deleted here. Shared wallets are removed by Master Admin.
-                        </p>
-                      </div>
-                    ) : null}
+                    <div className="pt-4 border-t border-slate-200 dark:border-slate-600">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full border-rose-200 text-rose-700 hover:bg-rose-50 dark:border-rose-900/50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                        onClick={() => handleDeleteWallet(ew)}
+                      >
+                        <Trash2 size={16} className="inline mr-2" />
+                        Delete this wallet
+                      </Button>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-2">
+                        Removes the wallet and its ledger. Past transactions may still reference this ledger ID. Deleting a shared wallet affects every store that uses it.
+                      </p>
+                    </div>
                   </div>
                 );
               })()}
@@ -1049,7 +1046,17 @@ const WalletsView = () => {
                     </td>
                     <td className="p-4 text-right">
                       {canMutateWallet(w) ? (
-                        <button type="button" onClick={() => handleEditWallet(w)} className="p-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors" title="Edit"><Edit2 size={16} /></button>
+                        <div className="inline-flex items-center gap-0.5 justify-end">
+                          <button type="button" onClick={() => handleEditWallet(w)} className="p-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors" title="Edit wallet"><Edit2 size={16} /></button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteWallet(w)}
+                            className="p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors"
+                            title="Delete wallet"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       ) : (
                         <span className="text-xs text-slate-400 dark:text-slate-500">—</span>
                       )}
@@ -1073,9 +1080,7 @@ const WalletsView = () => {
                       <>
                         <Button size="sm" variant="outline" onClick={() => openPGForm(w.id)}><Plus size={14}/> Add PG</Button>
                         <button type="button" onClick={() => handleEditWallet(w)} className="p-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors" title="Edit wallet"><Edit2 size={14}/></button>
-                        {canDeleteWallet(w) ? (
-                          <button type="button" onClick={() => handleDeleteWallet(w)} className="p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors" title="Delete wallet"><Trash2 size={14}/></button>
-                        ) : null}
+                        <button type="button" onClick={() => handleDeleteWallet(w)} className="p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors" title="Delete wallet"><Trash2 size={14}/></button>
                       </>
                     ) : null}
                   </div>
