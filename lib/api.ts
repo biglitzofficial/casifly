@@ -107,7 +107,7 @@ export const api = {
     return fetchApi<unknown[]>('/erp/wallets');
   },
 
-  async addWallet(body: { name: string; pgName?: string; charges?: Record<string, number>; storeId?: string }) {
+  async addWallet(body: { name: string; pgName?: string; charges?: Record<string, number>; storeId?: string; openingBalance?: number }) {
     return fetchApi<unknown>('/erp/wallets', { method: 'POST', body: JSON.stringify(body) });
   },
 

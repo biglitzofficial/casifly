@@ -144,6 +144,8 @@ export interface CreateWalletDTO {
   pgName: string;
   charges: Rates;
   storeId?: string; // undefined = global, set = store-specific
+  /** One-time opening: Dr wallet ledger / Cr retained earnings (Q002). Ignored if ≤ 0. */
+  openingBalance?: number;
 }
 
 export interface BalanceSheet {

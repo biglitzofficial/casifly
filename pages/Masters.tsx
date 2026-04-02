@@ -6,7 +6,7 @@ import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent, Input, Button, Select } from '../components/ui/Elements';
 import { PageFilters } from '../components/ui/PageFilters';
 import { Plus, Save, Activity, Users, Wallet as WalletIcon, Edit2, X, List, LayoutGrid, Trash2, Download, Upload, Building2 } from 'lucide-react';
-import { CreateCustomerDTO, CreateWalletDTO, PGConfig, Rates } from '../types';
+import { CreateCustomerDTO, PGConfig, Rates, Wallet } from '../types';
 import { formatCurrency, safeParseFloat } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
 import { TransactionType } from '../types';
@@ -358,6 +358,8 @@ const ReconciliationView = () => {
 };
 
 const DEFAULT_RATES = { visa: 2.0, master: 2.0, amex: 3.0, rupay: 1.5 };
+/** Default PG MDR template for new wallets (matches server default). */
+const NEW_WALLET_PG_RATES: Rates = { visa: 1.2, master: 1.2, amex: 2.5, rupay: 0.5 };
 const toRateStrings = (r: Rates) => ({ visa: String(r.visa), master: String(r.master), amex: String(r.amex), rupay: String(r.rupay) });
 
 const PHONE_REGEX = /^\d{0,10}$/;
@@ -647,19 +649,33 @@ const CustomersView = () => {
 };
 
 const WalletsView = () => {
-  const { wallets, updateWallet, addWalletPG, updateWalletPG, getAccountBalance, formatCurrency } = useERP();
+  const { user } = useAuth();
+  const toast = useToast();
+  const { wallets, updateWallet, addWallet, addWalletPG, updateWalletPG, getAccountBalance, formatCurrency, recordWalletOpeningBalance } = useERP();
+  const isStoreAdmin = user?.role === 'product_admin';
+  const canMutateWallet = (w: Wallet) =>
+    isStoreAdmin && !!user?.productId && w.storeId === user.productId;
+
   const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingPG, setEditingPG] = useState<{ walletId: string, pgName: string | null } | null>(null);
   const [search, setSearch] = useState('');
   const [editWalletName, setEditWalletName] = useState('');
   const [editWalletError, setEditWalletError] = useState('');
+  const [openingExtraAmount, setOpeningExtraAmount] = useState('');
+  const [showAddWallet, setShowAddWallet] = useState(false);
+  const [newWalletName, setNewWalletName] = useState('');
+  const [newWalletPgName, setNewWalletPgName] = useState('Default PG');
+  const [newWalletOpening, setNewWalletOpening] = useState('');
+  const [newWalletErrors, setNewWalletErrors] = useState<Record<string, string>>({});
   const [pgForm, setPgForm] = useState({
     name: '', visa: '', master: '', amex: '', rupay: ''
   });
   const [pgErrors, setPgErrors] = useState<Record<string, string>>({});
 
   const openPGForm = (walletId: string, pg?: PGConfig) => {
+    const w = wallets.find((x) => x.id === walletId);
+    if (w && !canMutateWallet(w)) return;
     setEditingPG({ walletId, pgName: pg ? pg.name : null });
     setPgErrors({});
     if (pg) {
@@ -675,10 +691,43 @@ const WalletsView = () => {
     }
   };
 
-  const handleEditWallet = (w: { id: string; name: string }) => {
+  const handleEditWallet = (w: Wallet) => {
+    if (!canMutateWallet(w)) return;
     setEditingId(w.id);
     setEditWalletName(w.name);
     setEditWalletError('');
+    setOpeningExtraAmount('');
+  };
+
+  const resetAddWalletForm = () => {
+    setNewWalletName('');
+    setNewWalletPgName('Default PG');
+    setNewWalletOpening('');
+    setNewWalletErrors({});
+    setShowAddWallet(false);
+  };
+
+  const handleAddWallet = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isStoreAdmin || !user?.productId) return;
+    const err: Record<string, string> = {};
+    const name = newWalletName.trim();
+    if (!name) err.name = 'Wallet name is required';
+    else if (name.length < 2) err.name = 'Name must be at least 2 characters';
+    const o = safeParseFloat(newWalletOpening);
+    if (newWalletOpening.trim() !== '' && (isNaN(o) || o < 0)) err.opening = 'Opening balance must be 0 or more';
+    setNewWalletErrors(err);
+    if (Object.keys(err).length > 0) return;
+
+    addWallet({
+      name,
+      pgName: newWalletPgName.trim() || 'Default PG',
+      charges: { ...NEW_WALLET_PG_RATES },
+      storeId: user.productId,
+      openingBalance: newWalletOpening.trim() === '' ? 0 : o,
+    });
+    resetAddWalletForm();
+    toast.success('Wallet created');
   };
 
   const handleWalletNameSave = (e: React.FormEvent) => {
@@ -758,8 +807,64 @@ const WalletsView = () => {
             </button>
           </div>
         </div>
-        <p className="text-sm text-slate-500 dark:text-slate-400">Wallets are created in Master Admin. You can edit wallet details here.</p>
+        {isStoreAdmin && (
+          <Button type="button" onClick={() => setShowAddWallet(true)}>
+            <Plus size={16} /> Add wallet
+          </Button>
+        )}
+        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-xl">
+          {isStoreAdmin
+            ? 'You can add wallets for your store, rename them, configure payment gateways, and set opening balances. Shared (global) wallets are view-only here — contact Master Admin to change them.'
+            : 'View wallets and balances. Only the store admin can add or edit wallets.'}
+        </p>
       </div>
+
+      {showAddWallet && isStoreAdmin && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader
+              title="Add wallet"
+              action={<Button variant="outline" size="sm" onClick={resetAddWalletForm}><X size={16} /></Button>}
+            />
+            <CardContent>
+              <form onSubmit={handleAddWallet} className="space-y-4">
+                <Input
+                  label="Wallet name"
+                  value={newWalletName}
+                  onChange={(e) => { setNewWalletName(e.target.value); setNewWalletErrors((p) => ({ ...p, name: '' })); }}
+                  error={newWalletErrors.name}
+                  placeholder="e.g. Razorpay Main"
+                />
+                <Input
+                  label="Default payment gateway name"
+                  value={newWalletPgName}
+                  onChange={(e) => setNewWalletPgName(e.target.value)}
+                  placeholder="Default PG"
+                />
+                <Input
+                  label="Opening balance (₹)"
+                  type="number"
+                  value={newWalletOpening}
+                  onChange={(e) => { setNewWalletOpening(e.target.value); setNewWalletErrors((p) => ({ ...p, opening: '' })); }}
+                  error={newWalletErrors.opening}
+                  placeholder="0 — optional"
+                />
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Opening balance books <strong>Dr</strong> this wallet / <strong>Cr</strong> Retained earnings (Q002). Default MDR % for the first PG are Visa 1.2%, Master 1.2%, Amex 2.5%, Rupay 0.5% — edit under Payment Gateways after save.
+                </p>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" className="flex-1" onClick={resetAddWalletForm}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" className="flex-1">
+                    Create wallet
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {editingPG && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -788,14 +893,50 @@ const WalletsView = () => {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <Card className="w-full max-w-md">
             <CardHeader 
-              title="Edit Wallet Name" 
-              action={<Button variant="outline" size="sm" onClick={() => setEditingId(null)}><X size={16}/></Button>} 
+              title="Edit wallet" 
+              action={<Button variant="outline" size="sm" onClick={() => { setEditingId(null); setOpeningExtraAmount(''); }}><X size={16}/></Button>} 
             />
             <CardContent>
               <form onSubmit={handleWalletNameSave} className="space-y-4">
                 <Input label="Wallet Name" value={editWalletName} onChange={e => { setEditWalletName(e.target.value); setEditWalletError(''); }} error={editWalletError} placeholder="Wallet name" />
-                <Button type="submit" className="w-full">Save</Button>
+                <Button type="submit" className="w-full">Save name</Button>
               </form>
+              {isStoreAdmin && (() => {
+                const ew = wallets.find((x) => x.id === editingId);
+                if (!ew || !canMutateWallet(ew)) return null;
+                return (
+                  <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-600 space-y-3">
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">Opening balance entry</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Posts a journal: debit this wallet, credit retained earnings. Use for additional opening or corrections (you can run multiple times).
+                    </p>
+                    <Input
+                      label="Amount (₹)"
+                      type="number"
+                      value={openingExtraAmount}
+                      onChange={(e) => setOpeningExtraAmount(e.target.value)}
+                      placeholder="e.g. 50000"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        const v = safeParseFloat(openingExtraAmount);
+                        if (isNaN(v) || v <= 0) {
+                          toast.error('Enter a positive amount');
+                          return;
+                        }
+                        recordWalletOpeningBalance(editingId, v);
+                        setOpeningExtraAmount('');
+                        toast.success('Opening balance posted');
+                      }}
+                    >
+                      Post opening entry
+                    </Button>
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         </div>
@@ -823,16 +964,24 @@ const WalletsView = () => {
                     <td className="p-4">
                       <div className="flex flex-wrap gap-2 items-center">
                         {w.pgs.map(pg => (
-                          <span key={pg.name} className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 rounded text-xs font-medium group">
+                          <span key={pg.name} className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 dark:bg-slate-700 rounded text-xs font-medium group">
                             {pg.name}
-                            <button onClick={() => openPGForm(w.id, pg)} className="p-0.5 text-indigo-600 hover:bg-indigo-100 rounded opacity-70 group-hover:opacity-100" title="Edit PG"><Edit2 size={12}/></button>
+                            {canMutateWallet(w) ? (
+                              <button type="button" onClick={() => openPGForm(w.id, pg)} className="p-0.5 text-indigo-600 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 rounded opacity-70 group-hover:opacity-100" title="Edit PG"><Edit2 size={12}/></button>
+                            ) : null}
                           </span>
                         ))}
-                        <button onClick={() => openPGForm(w.id)} className="text-indigo-600 hover:underline text-xs font-semibold">+ Add PG</button>
+                        {canMutateWallet(w) ? (
+                          <button type="button" onClick={() => openPGForm(w.id)} className="text-indigo-600 hover:underline text-xs font-semibold">+ Add PG</button>
+                        ) : null}
                       </div>
                     </td>
                     <td className="p-4 text-right">
-                      <button onClick={() => handleEditWallet(w)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Edit"><Edit2 size={16} /></button>
+                      {canMutateWallet(w) ? (
+                        <button type="button" onClick={() => handleEditWallet(w)} className="p-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors" title="Edit"><Edit2 size={16} /></button>
+                      ) : (
+                        <span className="text-xs text-slate-400 dark:text-slate-500">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -849,8 +998,12 @@ const WalletsView = () => {
                 subtitle={`Ledger: ${w.ledgerAccountId}`} 
                 action={
                   <div className="flex items-center gap-1">
-                    <Button size="sm" variant="outline" onClick={() => openPGForm(w.id)}><Plus size={14}/> Add PG</Button>
-                    <button onClick={() => handleEditWallet(w)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Edit"><Edit2 size={14}/></button>
+                    {canMutateWallet(w) ? (
+                      <>
+                        <Button size="sm" variant="outline" onClick={() => openPGForm(w.id)}><Plus size={14}/> Add PG</Button>
+                        <button type="button" onClick={() => handleEditWallet(w)} className="p-2 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors" title="Edit"><Edit2 size={14}/></button>
+                      </>
+                    ) : null}
                   </div>
                 }
               />
@@ -859,7 +1012,9 @@ const WalletsView = () => {
                   <div key={pg.name} className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4 border border-slate-100 dark:border-slate-700">
                     <div className="flex justify-between items-center mb-2">
                       <p className="font-bold text-slate-700 dark:text-slate-300">{pg.name}</p>
-                      <button onClick={() => openPGForm(w.id, pg)} className="text-indigo-600 hover:text-indigo-800 p-1 rounded-lg hover:bg-indigo-50 transition-colors"><Edit2 size={14}/></button>
+                      {canMutateWallet(w) ? (
+                        <button type="button" onClick={() => openPGForm(w.id, pg)} className="text-indigo-600 hover:text-indigo-800 dark:hover:text-indigo-300 p-1 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"><Edit2 size={14}/></button>
+                      ) : null}
                     </div>
                     <div className="grid grid-cols-4 gap-2 text-center text-xs">
                       <div className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-100 dark:border-slate-600"><div className="text-slate-500 dark:text-slate-400 text-[10px] font-bold uppercase">Visa</div><span className="font-bold dark:text-slate-200">{pg.charges.visa}%</span></div>

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { v4 as uuid } from 'uuid';
 import { db } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -8,6 +8,25 @@ erpRouter.use(authMiddleware);
 
 function getId(prefix: string) {
   return prefix + Date.now().toString(36).slice(-4) + Math.random().toString(36).slice(2, 6);
+}
+
+function walletStoreId(w: { store_id?: string | null } | null): string | null {
+  if (!w) return null;
+  return w.store_id ?? null;
+}
+
+/** Store admins may only change wallets owned by their product. */
+function assertCanWriteWallet(user: any, w: { store_id?: string | null }, res: Response): boolean {
+  if (user.role === 'master_admin') return true;
+  if (user.role === 'product_admin') {
+    if (walletStoreId(w) !== (user.productId ?? '')) {
+      res.status(403).json({ error: 'You can only change wallets owned by your store' });
+      return false;
+    }
+    return true;
+  }
+  res.status(403).json({ error: 'Not allowed' });
+  return false;
 }
 
 erpRouter.get('/accounts', async (req, res) => {
@@ -134,35 +153,82 @@ erpRouter.get('/wallets', async (req, res) => {
 
 erpRouter.post('/wallets', async (req, res) => {
   const user = (req as any).user;
-  if (user.role !== 'master_admin') {
-    res.status(403).json({ error: 'Store users cannot create wallets' });
+  if (user.role === 'user') {
+    res.status(403).json({ error: 'Not allowed to create wallets' });
     return;
   }
-  const { name, pgName, charges, storeId } = req.body;
+  if (user.role !== 'master_admin' && user.role !== 'product_admin') {
+    res.status(403).json({ error: 'Not allowed' });
+    return;
+  }
+  const { name, pgName, charges, storeId, openingBalance } = req.body;
   if (!name?.trim()) {
     res.status(400).json({ error: 'Wallet name required' });
+    return;
+  }
+  let resolvedStoreId: string | null = null;
+  if (user.role === 'product_admin') {
+    if (!user.productId) {
+      res.status(403).json({ error: 'Store context required' });
+      return;
+    }
+    resolvedStoreId = user.productId;
+  } else {
+    resolvedStoreId = storeId || null;
+  }
+  const openingRaw = Number(openingBalance);
+  const opening = Number.isFinite(openingRaw) && openingRaw > 0 ? Math.round(openingRaw * 100) / 100 : 0;
+  if (opening > 1e12) {
+    res.status(400).json({ error: 'Opening balance too large' });
     return;
   }
   const ledgerId = getId('A');
   const walletId = getId('W');
   const pgs = [{ name: pgName || 'Default PG', charges: charges || { visa: 1.2, master: 1.2, amex: 2.5, rupay: 0.5 } }];
-  await db.addAccount({ id: ledgerId, name: name.trim(), type: 'ASSET', category: 'Wallet', balance: 0 });
-  await db.addWallet({ id: walletId, name: name.trim(), ledger_account_id: ledgerId, pgs: JSON.stringify(pgs), store_id: storeId || null });
+  await db.addAccount({
+    id: ledgerId,
+    name: name.trim(),
+    type: 'ASSET',
+    category: 'Wallet',
+    balance: 0,
+    store_id: resolvedStoreId,
+  });
+  await db.addWallet({
+    id: walletId,
+    name: name.trim(),
+    ledger_account_id: ledgerId,
+    pgs: JSON.stringify(pgs),
+    store_id: resolvedStoreId,
+  });
+  if (opening > 0.005) {
+    const txnId = uuid();
+    const meta = { storeId: resolvedStoreId || user.productId || undefined };
+    const entries = JSON.stringify([
+      { accountId: ledgerId, debit: opening, credit: 0 },
+      { accountId: 'Q002', debit: 0, credit: opening },
+    ]);
+    await db.addTransaction({
+      id: txnId,
+      date: new Date().toISOString(),
+      description: `Opening balance: ${name.trim()}`,
+      type: 'JOURNAL',
+      entries,
+      status: 'COMPLETED',
+      metadata: JSON.stringify(meta),
+      reference_id: null,
+    });
+  }
   res.json({
     id: walletId,
     name: name.trim(),
     ledgerAccountId: ledgerId,
     pgs,
-    storeId: storeId || undefined,
+    storeId: resolvedStoreId || undefined,
   });
 });
 
 erpRouter.put('/wallets/:id', async (req, res) => {
   const user = (req as any).user;
-  if (user.role !== 'master_admin') {
-    res.status(403).json({ error: 'Store users cannot edit wallets' });
-    return;
-  }
   const { id } = req.params;
   const { name } = req.body;
   const w = await db.getWallet(id);
@@ -170,6 +236,7 @@ erpRouter.put('/wallets/:id', async (req, res) => {
     res.status(404).json({ error: 'Wallet not found' });
     return;
   }
+  if (!assertCanWriteWallet(user, w, res)) return;
   if (name !== undefined) await db.updateWallet(id, { name: name.trim() });
   const updated = await db.getWallet(id);
   res.json({ id: updated!.id, name: updated!.name, ledgerAccountId: updated!.ledger_account_id, pgs: typeof updated!.pgs === 'string' ? JSON.parse(updated!.pgs) : updated!.pgs, storeId: updated!.store_id || undefined });
@@ -177,21 +244,19 @@ erpRouter.put('/wallets/:id', async (req, res) => {
 
 erpRouter.delete('/wallets/:id', async (req, res) => {
   const user = (req as any).user;
-  if (user.role !== 'master_admin') {
-    res.status(403).json({ error: 'Store users cannot delete wallets' });
-    return;
-  }
   const { id } = req.params;
   const w = await db.getWallet(id);
   if (!w) {
     res.status(404).json({ error: 'Wallet not found' });
     return;
   }
+  if (!assertCanWriteWallet(user, w, res)) return;
   await db.deleteWallet(id);
   res.json({ ok: true });
 });
 
 erpRouter.patch('/wallets/:id/pgs', async (req, res) => {
+  const user = (req as any).user;
   const { id } = req.params;
   const { action, pgConfig, oldPgName } = req.body;
   const w = await db.getWallet(id);
@@ -199,6 +264,7 @@ erpRouter.patch('/wallets/:id/pgs', async (req, res) => {
     res.status(404).json({ error: 'Wallet not found' });
     return;
   }
+  if (!assertCanWriteWallet(user, w, res)) return;
   let pgs = typeof w.pgs === 'string' ? JSON.parse(w.pgs) : w.pgs;
   if (action === 'add' && pgConfig) {
     pgs.push(pgConfig);

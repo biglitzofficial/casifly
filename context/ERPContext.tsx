@@ -32,6 +32,8 @@ interface ERPContextType {
   addWalletPG: (walletId: string, pgConfig: PGConfig) => void;
   updateWalletPG: (walletId: string, oldPgName: string, pgConfig: PGConfig) => void;
   addAccount: (data: { name: string; category: 'Bank' | 'Cash' }) => void;
+  /** Dr wallet ledger / Cr Q002 — use for store-owned wallets (e.g. after create or corrections). */
+  recordWalletOpeningBalance: (walletId: string, amount: number) => void | Promise<void>;
 
   // Getters
   getAccountBalance: (accountId: string) => number;
@@ -292,11 +294,18 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const addWallet = (data: CreateWalletDTO) => {
+    const opening = roundCurrency(Math.max(0, data.openingBalance ?? 0));
     if (USE_API) {
-      api.addWallet({ name: data.name, pgName: data.pgName, charges: data.charges, storeId: data.storeId })
+      return api
+        .addWallet({
+          name: data.name,
+          pgName: data.pgName,
+          charges: data.charges,
+          storeId: data.storeId,
+          openingBalance: opening > 0 ? opening : undefined,
+        })
         .then(() => refreshFromApi())
         .catch((e: any) => toast.error(e?.message || 'Failed to add wallet'));
-      return;
     }
     const ledgerId = generateId('A');
     const walletId = generateId('W');
@@ -322,6 +331,40 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     setAccounts(prev => [...prev, newAccount]);
     setWallets(prev => [...prev, newWallet]);
+
+    if (opening > 0.005) {
+      window.setTimeout(() => {
+        const meta: TransactionMetadata = { storeId: user?.productId ?? data.storeId };
+        const p = postTransaction(
+          `Opening balance: ${data.name}`,
+          TransactionType.JOURNAL,
+          [
+            { accountId: ledgerId, debit: opening, credit: 0 },
+            { accountId: 'Q002', debit: 0, credit: opening },
+          ],
+          meta
+        );
+        if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => {});
+      }, 0);
+    }
+  };
+
+  const recordWalletOpeningBalance = (walletId: string, amount: number) => {
+    const amt = roundCurrency(amount);
+    if (amt <= 0) {
+      toast.error('Enter an opening balance greater than zero');
+      return;
+    }
+    const wallet = allWallets.find((w) => w.id === walletId);
+    if (!wallet) return;
+    const desc = `Opening balance: ${wallet.name}`;
+    const entries: LedgerEntry[] = [
+      { accountId: wallet.ledgerAccountId, debit: amt, credit: 0 },
+      { accountId: 'Q002', debit: 0, credit: amt },
+    ];
+    const meta: TransactionMetadata = { storeId: user?.productId ?? undefined, walletId: wallet.id };
+    const p = postTransaction(desc, TransactionType.JOURNAL, entries, meta);
+    if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => {});
   };
 
   const updateWallet = (id: string, data: Partial<Pick<Wallet, 'name'>>) => {
@@ -636,6 +679,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       addWalletPG,
       updateWalletPG,
       addAccount,
+      recordWalletOpeningBalance,
       generateBalanceSheet,
       generateProfitAndLoss,
       exportBackup,
