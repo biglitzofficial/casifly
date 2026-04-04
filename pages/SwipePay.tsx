@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useERP } from '../context/ERPContext';
 import { useToast } from '../context/ToastContext';
 import { Layout } from '../components/Layout';
-import { LedgerEntry, TransactionType, Rates } from '../types';
+import { LedgerEntry, TransactionType, Transaction, Rates, Customer } from '../types';
 import {
   isSwipePayInflow,
   isSwipeInflowMarginSettledInBooks,
@@ -11,7 +11,7 @@ import {
 import { Card, CardContent, CardHeader, Input, Select, Button } from '../components/ui/Elements';
 import { safeParseFloat, roundCurrency } from '../lib/utils';
 import { DEFAULT_COMMISSION_RATES } from '../constants';
-import { ArrowRight, ArrowDownToLine, ArrowUpFromLine, Lock, Unlock, CheckCircle2, Info, UserPlus, Save, X } from 'lucide-react';
+import { ArrowRight, ArrowDownToLine, ArrowUpFromLine, Lock, Unlock, CheckCircle2, Info, UserPlus, Save, X, Users } from 'lucide-react';
 
 export const SwipePay: React.FC = () => {
   const { customers, wallets, transactions, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer } = useERP();
@@ -47,19 +47,58 @@ export const SwipePay: React.FC = () => {
   const [outflowLoading, setOutflowLoading] = useState(false);
   const [createCustLoading, setCreateCustLoading] = useState(false);
   const [linkedInflowId, setLinkedInflowId] = useState('');
+  const [outflowPickerQuery, setOutflowPickerQuery] = useState('');
+
+  /** All swipe inflows still awaiting linked payout (margin in L003). */
+  const allPendingSwipeInflows = useMemo(
+    () =>
+      transactions.filter(
+        (t) =>
+          t.type === TransactionType.SWIPE_PAY &&
+          t.status === 'COMPLETED' &&
+          !!t.metadata?.customerId &&
+          isSwipePayInflow(t) &&
+          swipeInflowPendingMarginAmount(t) > 0.005 &&
+          !isSwipeInflowMarginSettledInBooks(t.id, transactions)
+      ),
+    [transactions]
+  );
+
+  /** Customers with at least one pending inflow — primary outflow picker (handles high daily volume). */
+  const customersWithPendingSwipe = useMemo(() => {
+    const byCust = new Map<string, { customer: Customer; inflows: Transaction[]; latest: number }>();
+    for (const t of allPendingSwipeInflows) {
+      const cid = t.metadata!.customerId!;
+      const cust = customers.find((c) => c.id === cid);
+      if (!cust) continue;
+      const d = new Date(t.date).getTime();
+      const ex = byCust.get(cid);
+      if (!ex) {
+        byCust.set(cid, { customer: cust, inflows: [t], latest: d });
+      } else {
+        ex.inflows.push(t);
+        if (d > ex.latest) ex.latest = d;
+      }
+    }
+    return Array.from(byCust.values()).sort((a, b) => b.latest - a.latest);
+  }, [allPendingSwipeInflows, customers]);
+
+  const filteredPendingCustomers = useMemo(() => {
+    const raw = outflowPickerQuery.trim();
+    const q = raw.toLowerCase();
+    const digits = raw.replace(/\D/g, '');
+    if (!q && !digits) return customersWithPendingSwipe;
+    return customersWithPendingSwipe.filter(({ customer }) => {
+      const nameMatch = q.length > 0 && customer.name.toLowerCase().includes(q);
+      const phoneMatch = digits.length > 0 && customer.phone.includes(digits);
+      return nameMatch || phoneMatch;
+    });
+  }, [customersWithPendingSwipe, outflowPickerQuery]);
 
   const unsettledInflows = useMemo(() => {
     if (!customerId || mode !== 'outflow') return [];
-    return transactions.filter(
-      (t) =>
-        t.type === TransactionType.SWIPE_PAY &&
-        t.status === 'COMPLETED' &&
-        t.metadata?.customerId === customerId &&
-        isSwipePayInflow(t) &&
-        swipeInflowPendingMarginAmount(t) > 0.005 &&
-        !isSwipeInflowMarginSettledInBooks(t.id, transactions)
-    );
-  }, [transactions, customerId, mode]);
+    return allPendingSwipeInflows.filter((t) => t.metadata?.customerId === customerId);
+  }, [allPendingSwipeInflows, customerId, mode]);
 
   // --- Logic ---
   const selectedWallet = wallets.find(w => w.id === swipeWalletId);
@@ -114,6 +153,16 @@ export const SwipePay: React.FC = () => {
     setCustomerName('');
     setPhone('');
     setIsNewCustomer(false);
+    setLinkedInflowId('');
+  };
+
+  const selectOutflowCustomer = (cust: Customer) => {
+    setCustomerId(cust.id);
+    setCustomerName(cust.name);
+    setPhone(cust.phone);
+    setCommissionRates(toRateStrings(cust.commissionRates));
+    setIsNewCustomer(false);
+    setIsPhoneLocked(true);
     setLinkedInflowId('');
   };
 
@@ -319,7 +368,15 @@ export const SwipePay: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => { setMode('outflow'); resetCustomer(); setPayoutAmount(''); setTransferCommission('0'); setStep2Errors({}); setLinkedInflowId(''); }}
+              onClick={() => {
+                setMode('outflow');
+                resetCustomer();
+                setOutflowPickerQuery('');
+                setPayoutAmount('');
+                setTransferCommission('0');
+                setStep2Errors({});
+                setLinkedInflowId('');
+              }}
               className={`flex-1 flex items-center justify-center gap-2 py-4 px-6 rounded-xl font-bold text-sm uppercase tracking-wider transition-all ${mode === 'outflow' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-200'}`}
             >
               <ArrowUpFromLine size={20} /> Outflow Entry
@@ -329,7 +386,11 @@ export const SwipePay: React.FC = () => {
           <Card className={`border-t-4 ${mode === 'inflow' ? 'border-t-indigo-500' : 'border-t-emerald-500'}`}>
             <CardHeader 
               title={mode === 'inflow' ? "Inflow Data Entry" : "Outflow Data Entry"} 
-              subtitle={mode === 'inflow' ? "Record customer swipe (inflow)" : "Record payout settlement (outflow)"} 
+              subtitle={
+                mode === 'inflow'
+                  ? 'Record customer swipe (inflow)'
+                  : 'Pick who received a swipe inflow, then record their payout'
+              }
             />
             <CardContent>
               {mode === 'inflow' ? (
@@ -438,42 +499,114 @@ export const SwipePay: React.FC = () => {
                 </div>
               ) : (
                 <div className="space-y-6 animate-fade-in">
-                  {/* Outflow: Customer lookup (same as Inflow - standalone) */}
-                  <div className="p-5 bg-slate-50/80 rounded-xl border border-slate-200 space-y-4">
-                    <div className="flex items-end gap-3">
-                      <div className="flex-1">
-                        <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                          {isPhoneLocked ? <Lock size={14}/> : <Unlock size={14}/>} Mobile Number (10 Digits)
-                        </label>
-                        <input 
-                          type="text"
-                          maxLength={10}
-                          className={`w-full px-4 py-3 border rounded-xl outline-none transition-all duration-200 text-lg font-mono ${isPhoneLocked ? 'bg-slate-100 text-slate-500 border-slate-300' : 'border-emerald-300 focus:ring-2 focus:ring-emerald-500/30 font-bold'}`}
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
-                          disabled={isPhoneLocked}
-                          placeholder="00000 00000"
-                        />
-                      </div>
-                      {isPhoneLocked ? (
-                        <Button type="button" variant="outline" onClick={resetCustomer} className="h-[52px]">Change</Button>
-                      ) : (
-                        <Button type="button" onClick={handlePhoneSearch} disabled={phone.length !== 10} className="h-[52px] bg-emerald-600 hover:bg-emerald-700">Search</Button>
-                      )}
-                    </div>
-                    {isPhoneLocked && !isNewCustomer && (
-                      <div className="p-4 bg-white rounded-xl border border-slate-200 flex justify-between items-center">
-                        <div>
-                          <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Customer</p>
-                          <p className="font-bold text-slate-900">{customerName}</p>
+                  {!isPhoneLocked || isNewCustomer ? (
+                    <div className="space-y-4">
+                      <div className="p-4 bg-emerald-50/90 rounded-xl border border-emerald-100 flex gap-3 items-start">
+                        <Users className="text-emerald-700 shrink-0 mt-0.5" size={20} />
+                        <div className="text-sm text-emerald-900">
+                          <p className="font-bold">Customers with pending swipe settlement</p>
+                          <p className="text-emerald-800/90 mt-1">
+                            These are people who have an inflow recorded but payout (and margin recognition) is not linked yet.
+                            Tap one to continue, or search by phone below if they are not listed.
+                          </p>
                         </div>
-                        <CheckCircle2 className="text-emerald-600" size={20}/>
                       </div>
-                    )}
-                    {isPhoneLocked && isNewCustomer && (
-                      <p className="text-sm text-amber-700">Customer not found. Create via Inflow first.</p>
-                    )}
-                  </div>
+                      <Input
+                        label="Filter by name or phone"
+                        placeholder="Search…"
+                        value={outflowPickerQuery}
+                        onChange={(e) => setOutflowPickerQuery(e.target.value)}
+                        className="font-medium"
+                      />
+                      <div className="max-h-[min(24rem,50vh)] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                        {filteredPendingCustomers.length === 0 ? (
+                          <p className="p-4 text-sm text-slate-600">
+                            {customersWithPendingSwipe.length === 0
+                              ? 'No pending swipe inflows to settle. Record an inflow first, or use phone search for other payouts.'
+                              : 'No customers match your search.'}
+                          </p>
+                        ) : (
+                          <ul className="divide-y divide-slate-100">
+                            {filteredPendingCustomers.map(({ customer: c, inflows }) => {
+                              const pendingMargin = roundCurrency(
+                                inflows.reduce((sum, t) => sum + swipeInflowPendingMarginAmount(t), 0)
+                              );
+                              const latest = Math.max(...inflows.map((t) => new Date(t.date).getTime()));
+                              return (
+                                <li key={c.id}>
+                                  <button
+                                    type="button"
+                                    onClick={() => selectOutflowCustomer(c)}
+                                    className="w-full text-left px-4 py-3.5 hover:bg-emerald-50/90 transition-colors flex flex-wrap items-center justify-between gap-3"
+                                  >
+                                    <div>
+                                      <p className="font-bold text-slate-900">{c.name}</p>
+                                      <p className="text-sm font-mono text-slate-500 tracking-tight">{c.phone}</p>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                      <p className="text-xs font-bold text-emerald-800 uppercase tracking-wide">
+                                        {inflows.length} inflow{inflows.length !== 1 ? 's' : ''} pending
+                                      </p>
+                                      <p className="text-xs text-slate-600 mt-0.5">
+                                        Margin {formatCurrency(pendingMargin)} ·{' '}
+                                        {new Date(latest).toLocaleString(undefined, {
+                                          dateStyle: 'short',
+                                          timeStyle: 'short',
+                                        })}
+                                      </p>
+                                    </div>
+                                  </button>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                      <div className="p-5 bg-slate-50/80 rounded-xl border border-slate-200 space-y-4">
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Or search by phone</p>
+                        <div className="flex items-end gap-3">
+                          <div className="flex-1">
+                            <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                              <Unlock size={14} /> Mobile Number (10 Digits)
+                            </label>
+                            <input
+                              type="text"
+                              maxLength={10}
+                              className="w-full px-4 py-3 border border-emerald-300 rounded-xl outline-none transition-all duration-200 text-lg font-mono focus:ring-2 focus:ring-emerald-500/30 font-bold"
+                              value={phone}
+                              onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+                              placeholder="00000 00000"
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            onClick={handlePhoneSearch}
+                            disabled={phone.length !== 10}
+                            className="h-[52px] bg-emerald-600 hover:bg-emerald-700"
+                          >
+                            Search
+                          </Button>
+                        </div>
+                        {isPhoneLocked && isNewCustomer && (
+                          <p className="text-sm text-amber-700">Customer not found. Create via Inflow first.</p>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-5 bg-slate-50/80 rounded-xl border border-slate-200 space-y-4">
+                      <div className="p-4 bg-white rounded-xl border border-slate-200 flex justify-between items-center gap-3">
+                        <div>
+                          <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Selected customer</p>
+                          <p className="font-bold text-slate-900">{customerName}</p>
+                          <p className="text-sm font-mono text-slate-600 mt-0.5">{phone}</p>
+                        </div>
+                        <CheckCircle2 className="text-emerald-600 shrink-0" size={22} />
+                      </div>
+                      <Button type="button" variant="outline" onClick={() => { resetCustomer(); setOutflowPickerQuery(''); }} className="w-full sm:w-auto">
+                        Change customer
+                      </Button>
+                    </div>
+                  )}
 
                   {isPhoneLocked && !isNewCustomer && (
                     <form onSubmit={handleStep2Submit} className="space-y-6">
