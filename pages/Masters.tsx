@@ -6,12 +6,151 @@ import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent, Input, Button, Select } from '../components/ui/Elements';
 import { PageFilters } from '../components/ui/PageFilters';
 import { Plus, Save, Activity, Users, Wallet as WalletIcon, Edit2, X, List, LayoutGrid, Trash2, Download, Upload, Building2, Landmark } from 'lucide-react';
-import { CreateCustomerDTO, PGConfig, Rates, Wallet } from '../types';
-import { formatCurrency, safeParseFloat } from '../lib/utils';
+import { CreateCustomerDTO, PGConfig, Rates, Wallet, Account, ProfitAndLoss } from '../types';
+import { formatCurrency, safeParseFloat, roundCurrency } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
 import { TransactionType } from '../types';
 
 type Tab = 'reconcile' | 'customers' | 'wallets' | 'banks' | 'data';
+
+function WalletCapitalBreakdown({
+  wallets,
+  accounts,
+  getAccountBalance,
+  formatCurrency,
+  generateProfitAndLoss,
+}: {
+  wallets: Wallet[];
+  accounts: Account[];
+  getAccountBalance: (accountId: string) => number;
+  formatCurrency: (amount: number) => string;
+  generateProfitAndLoss: () => ProfitAndLoss;
+}) {
+  const rows = [...wallets]
+    .map((w) => ({
+      w,
+      balance: getAccountBalance(w.ledgerAccountId),
+    }))
+    .sort((a, b) => a.w.name.localeCompare(b.w.name));
+  const totalWalletAssets = rows.reduce((s, r) => s + r.balance, 0);
+  const pl = generateProfitAndLoss();
+  const netProfit = pl.netProfit;
+  const payablesL001 = getAccountBalance('L001');
+  const l001Account = accounts.find((a) => a.id === 'L001');
+  const payablesLabel = l001Account?.name ? `${l001Account.name} (L001)` : 'Customer Paid To (L001)';
+  const capitalResidual = roundCurrency(totalWalletAssets - payablesL001 - netProfit);
+  const sourcesTotal = roundCurrency(capitalResidual + netProfit + payablesL001);
+  const tieOk = Math.abs(sourcesTotal - totalWalletAssets) < 0.02;
+
+  return (
+    <Card className="border-indigo-100 dark:border-indigo-900/40 shadow-md overflow-hidden">
+      <CardHeader
+        title="Wallet balances, capital & payables"
+        subtitle="Workbook layout: total wallets = Capital + Profit + Payables when activity stays in wallets and L001. Always visible on this tab."
+      />
+      <CardContent className="!pt-2 !pb-6">
+        <div className="flex items-center gap-2 mb-4 text-indigo-700 dark:text-indigo-400">
+          <Landmark size={22} className="shrink-0 opacity-90" />
+          <p className="text-sm font-semibold">Live from your ledger — same as Reports / P&amp;L (workbook net profit).</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-600">
+                <th className="text-left p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Wallet</th>
+                <th className="text-left p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider hidden sm:table-cell">Ledger</th>
+                <th className="text-right p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Balance</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="p-6 text-center text-slate-500 dark:text-slate-400">
+                    No wallets in this view.
+                  </td>
+                </tr>
+              ) : (
+                rows.map(({ w, balance }) => (
+                  <tr key={w.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                    <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">{w.name}</td>
+                    <td className="p-3 font-mono text-xs text-slate-500 dark:text-slate-400 hidden sm:table-cell">{w.ledgerAccountId}</td>
+                    <td className="p-3 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400 tabular-nums">{formatCurrency(balance)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 px-4 py-4">
+          <span className="font-bold text-indigo-900 dark:text-indigo-200">Total wallet assets</span>
+          <span className="text-xl font-black text-indigo-700 dark:text-indigo-300 tabular-nums">{formatCurrency(totalWalletAssets)}</span>
+        </div>
+
+        <div className="mt-6 space-y-3">
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Capital, profit &amp; payables</p>
+          <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+            <strong>Payables</strong> is the ledger balance on L001 (swipe inflow credits here until you record payout outflow).
+            <strong className="font-semibold"> Profit</strong> is the same <strong>net P&amp;L</strong> as Reports / Dashboard (workbook rules: deferred portal MDR on unsettled inflows excluded from expenses).
+            <strong className="font-semibold"> Capital</strong> is the remainder so <strong>Capital + Profit + Payables = Total wallet assets</strong>. If you move funds to bank/cash outside wallets, the two sides may not tie exactly.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-0 rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden">
+            <div className="p-4 bg-slate-50/80 dark:bg-slate-800/50 border-b sm:border-b-0 sm:border-r border-slate-200 dark:border-slate-600">
+              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-3">Liabilities &amp; capital</p>
+              <div className="space-y-2.5 text-sm">
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-600 dark:text-slate-400">Capital (residual)</span>
+                  <span className="font-mono font-semibold text-slate-900 dark:text-slate-100 tabular-nums">{formatCurrency(capitalResidual)}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-600 dark:text-slate-400">Profit (P&amp;L net)</span>
+                  <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums">{formatCurrency(netProfit)}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-600 dark:text-slate-400">Payables · {payablesLabel}</span>
+                  <span className="font-mono font-semibold text-amber-800 dark:text-amber-300 tabular-nums">{formatCurrency(payablesL001)}</span>
+                </div>
+                <div className="flex justify-between gap-2 pt-2.5 mt-1 border-t border-slate-200 dark:border-slate-600 font-bold">
+                  <span>Total</span>
+                  <span className="font-mono tabular-nums">{formatCurrency(sourcesTotal)}</span>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 bg-white dark:bg-slate-900/40">
+              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-3">Wallet assets</p>
+              <div className="space-y-2.5 text-sm">
+                {rows.map(({ w, balance }) => (
+                  <div key={w.id} className="flex justify-between gap-2">
+                    <span className="text-slate-600 dark:text-slate-400 truncate">{w.name}</span>
+                    <span className="font-mono font-medium text-slate-900 dark:text-slate-100 tabular-nums shrink-0">{formatCurrency(balance)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between gap-2 pt-2.5 mt-1 border-t border-slate-200 dark:border-slate-600 font-bold">
+                  <span>Total</span>
+                  <span className="font-mono tabular-nums text-indigo-700 dark:text-indigo-400">{formatCurrency(totalWalletAssets)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div
+            className={`flex items-center gap-2 text-xs font-medium rounded-lg px-3 py-2 ${
+              tieOk
+                ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                : 'bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200'
+            }`}
+          >
+            {tieOk ? (
+              <span>Capital + Profit + Payables matches total wallet assets.</span>
+            ) : (
+              <span>
+                Totals differ by {formatCurrency(Math.abs(sourcesTotal - totalWalletAssets))} — often bank/cash movements or non-wallet entries. Numbers above are still useful as a guide.
+              </span>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export const Masters: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('reconcile');
@@ -652,7 +791,7 @@ const WalletsView = () => {
   const { user } = useAuth();
   const toast = useToast();
   const { confirm } = useConfirm();
-  const { wallets, updateWallet, deleteWallet, addWallet, addWalletPG, updateWalletPG, removeWalletPG, getAccountBalance, formatCurrency, recordWalletOpeningBalance } = useERP();
+  const { wallets, accounts, updateWallet, deleteWallet, addWallet, addWalletPG, updateWalletPG, removeWalletPG, getAccountBalance, formatCurrency, recordWalletOpeningBalance, generateProfitAndLoss } = useERP();
   const isStoreAdmin = user?.role === 'product_admin';
   const isMasterAdmin = user?.role === 'master_admin';
   /** Same wallets as GET /wallets: global + this store's. Master Admin can change any wallet in the system. */
@@ -679,7 +818,6 @@ const WalletsView = () => {
     name: '', visa: '', master: '', amex: '', rupay: ''
   });
   const [pgErrors, setPgErrors] = useState<Record<string, string>>({});
-  const [showCapital, setShowCapital] = useState(false);
 
   const openPGForm = (walletId: string, pg?: PGConfig) => {
     const w = wallets.find((x) => x.id === walletId);
@@ -845,10 +983,6 @@ const WalletsView = () => {
             </button>
           </div>
         </div>
-        <Button type="button" variant="outline" onClick={() => setShowCapital(true)} className="gap-2">
-          <Landmark size={16} />
-          Capital
-        </Button>
         {isStoreAdmin && (
           <Button type="button" onClick={() => setShowAddWallet(true)}>
             <Plus size={16} /> Add wallet
@@ -861,68 +995,13 @@ const WalletsView = () => {
         </p>
       </div>
 
-      {showCapital && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl">
-            <CardHeader
-              title="Wallet capital"
-              subtitle="Total capital is the sum of each wallet’s current book balance (opening balance entries and all swipe, payout, and transfer activity)."
-              action={
-                <Button variant="outline" size="sm" onClick={() => setShowCapital(false)}>
-                  <X size={16} />
-                </Button>
-              }
-            />
-            <CardContent className="overflow-y-auto flex-1 pt-4 !pb-6">
-              {(() => {
-                const rows = [...wallets]
-                  .map((w) => ({
-                    w,
-                    balance: getAccountBalance(w.ledgerAccountId),
-                  }))
-                  .sort((a, b) => a.w.name.localeCompare(b.w.name));
-                const totalCapital = rows.reduce((s, r) => s + r.balance, 0);
-                return (
-                  <>
-                    <div className="rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-600">
-                            <th className="text-left p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Wallet</th>
-                            <th className="text-left p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider hidden sm:table-cell">Ledger</th>
-                            <th className="text-right p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Balance</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                          {rows.length === 0 ? (
-                            <tr>
-                              <td colSpan={3} className="p-6 text-center text-slate-500 dark:text-slate-400">
-                                No wallets in this view.
-                              </td>
-                            </tr>
-                          ) : (
-                            rows.map(({ w, balance }) => (
-                              <tr key={w.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                                <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">{w.name}</td>
-                                <td className="p-3 font-mono text-xs text-slate-500 dark:text-slate-400 hidden sm:table-cell">{w.ledgerAccountId}</td>
-                                <td className="p-3 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400 tabular-nums">{formatCurrency(balance)}</td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 px-4 py-4">
-                      <span className="font-bold text-indigo-900 dark:text-indigo-200">Total capital (all wallets)</span>
-                      <span className="text-xl font-black text-indigo-700 dark:text-indigo-300 tabular-nums">{formatCurrency(totalCapital)}</span>
-                    </div>
-                  </>
-                );
-              })()}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <WalletCapitalBreakdown
+        wallets={wallets}
+        accounts={accounts}
+        getAccountBalance={getAccountBalance}
+        formatCurrency={formatCurrency}
+        generateProfitAndLoss={generateProfitAndLoss}
+      />
 
       {showAddWallet && isStoreAdmin && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
