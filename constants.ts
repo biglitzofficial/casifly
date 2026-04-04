@@ -69,7 +69,7 @@ export const INITIAL_WALLETS: Wallet[] = [
     name: 'Wallet B (Paytm)',
     ledgerAccountId: 'A005',
     pgs: [
-      { name: 'Business', charges: { visa: 1.1, master: 1.1, amex: 2.4, rupay: 0.0 } },
+      { name: 'Business', charges: { visa: 1.1, master: 1.1, amex: 2.4, rupay: 0.5 } },
     ],
   },
 ];

@@ -5,7 +5,7 @@ import { useConfirm } from '../context/ConfirmContext';
 import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent, Input, Button, Select } from '../components/ui/Elements';
 import { PageFilters } from '../components/ui/PageFilters';
-import { Plus, Save, Activity, Users, Wallet as WalletIcon, Edit2, X, List, LayoutGrid, Trash2, Download, Upload, Building2 } from 'lucide-react';
+import { Plus, Save, Activity, Users, Wallet as WalletIcon, Edit2, X, List, LayoutGrid, Trash2, Download, Upload, Building2, Landmark } from 'lucide-react';
 import { CreateCustomerDTO, PGConfig, Rates, Wallet } from '../types';
 import { formatCurrency, safeParseFloat } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
@@ -679,6 +679,7 @@ const WalletsView = () => {
     name: '', visa: '', master: '', amex: '', rupay: ''
   });
   const [pgErrors, setPgErrors] = useState<Record<string, string>>({});
+  const [showCapital, setShowCapital] = useState(false);
 
   const openPGForm = (walletId: string, pg?: PGConfig) => {
     const w = wallets.find((x) => x.id === walletId);
@@ -844,6 +845,10 @@ const WalletsView = () => {
             </button>
           </div>
         </div>
+        <Button type="button" variant="outline" onClick={() => setShowCapital(true)} className="gap-2">
+          <Landmark size={16} />
+          Capital
+        </Button>
         {isStoreAdmin && (
           <Button type="button" onClick={() => setShowAddWallet(true)}>
             <Plus size={16} /> Add wallet
@@ -855,6 +860,69 @@ const WalletsView = () => {
             : 'View wallets and balances. Only the store admin can add or edit wallets.'}
         </p>
       </div>
+
+      {showCapital && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl">
+            <CardHeader
+              title="Wallet capital"
+              subtitle="Total capital is the sum of each wallet’s current book balance (opening balance entries and all swipe, payout, and transfer activity)."
+              action={
+                <Button variant="outline" size="sm" onClick={() => setShowCapital(false)}>
+                  <X size={16} />
+                </Button>
+              }
+            />
+            <CardContent className="overflow-y-auto flex-1 pt-4 !pb-6">
+              {(() => {
+                const rows = [...wallets]
+                  .map((w) => ({
+                    w,
+                    balance: getAccountBalance(w.ledgerAccountId),
+                  }))
+                  .sort((a, b) => a.w.name.localeCompare(b.w.name));
+                const totalCapital = rows.reduce((s, r) => s + r.balance, 0);
+                return (
+                  <>
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-600">
+                            <th className="text-left p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Wallet</th>
+                            <th className="text-left p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider hidden sm:table-cell">Ledger</th>
+                            <th className="text-right p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Balance</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                          {rows.length === 0 ? (
+                            <tr>
+                              <td colSpan={3} className="p-6 text-center text-slate-500 dark:text-slate-400">
+                                No wallets in this view.
+                              </td>
+                            </tr>
+                          ) : (
+                            rows.map(({ w, balance }) => (
+                              <tr key={w.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                                <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">{w.name}</td>
+                                <td className="p-3 font-mono text-xs text-slate-500 dark:text-slate-400 hidden sm:table-cell">{w.ledgerAccountId}</td>
+                                <td className="p-3 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400 tabular-nums">{formatCurrency(balance)}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 px-4 py-4">
+                      <span className="font-bold text-indigo-900 dark:text-indigo-200">Total capital (all wallets)</span>
+                      <span className="text-xl font-black text-indigo-700 dark:text-indigo-300 tabular-nums">{formatCurrency(totalCapital)}</span>
+                    </div>
+                  </>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {showAddWallet && isStoreAdmin && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
