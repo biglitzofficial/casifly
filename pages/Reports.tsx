@@ -167,7 +167,7 @@ export const Reports: React.FC = () => {
           customerId: t.metadata?.customerId,
           customer: customer?.name || 'Unknown',
           walletId: t.metadata?.walletId,
-          bankName: wallet?.name ?? '—',
+          walletName: wallet?.name ?? '—',
           card: cardLabel,
           appName: appPctDisplay,
           lead,
@@ -278,7 +278,7 @@ export const Reports: React.FC = () => {
       return;
     }
     const headers = [
-      '#', 'Date', 'Lead', 'Bank', 'Card #', 'Card type', 'App (portal)',
+      '#', 'Date', 'Lead', 'Wallet', 'Card #', 'Card type', 'App (portal)',
       'Actual amount', 'Gross amount', 'Shop %', 'Customer %', 'App %',
       'App charges', 'Shop charges', 'Customer charges', 'Net amount',
       'Gross profit', 'Transfer expense', 'Net profit', 'Customer (ref)', 'Commission', 'Remarks',
@@ -287,7 +287,7 @@ export const Reports: React.FC = () => {
       String(i + 1),
       new Date(r.date).toLocaleDateString(),
       r.lead,
-      r.bankName,
+      r.walletName,
       '—',
       r.card,
       r.appName,
@@ -572,12 +572,12 @@ export const Reports: React.FC = () => {
             {txnPlMode === 'swipe-inflow' ? (
             <DataTable 
               minTableWidth={1680}
-              headers={['#', 'Date', 'Lead', 'Bank', 'Card #', 'Card', 'App', 'Actual', 'Gross', 'Shop %', 'Cust %', 'App %', 'App chg', 'Shop chg', 'Cust chg', 'Net amt', 'Gr profit', 'Xfer exp', 'Net profit', 'Comm', 'Remarks']}
+              headers={['#', 'Date', 'Lead', 'Wallet', 'Card #', 'Card', 'App', 'Actual', 'Gross', 'Shop %', 'Cust %', 'App %', 'App chg', 'Shop chg', 'Cust chg', 'Net amt', 'Gr profit', 'Xfer exp', 'Net profit', 'Comm', 'Remarks']}
               rows={txnPL.map((t, idx) => [
                 idx + 1,
                 new Date(t.date).toLocaleDateString(),
                 t.lead,
-                <span className="font-medium text-slate-800 whitespace-nowrap">{t.bankName}</span>,
+                <span className="font-medium text-slate-800 whitespace-nowrap">{t.walletName}</span>,
                 '—',
                 t.card,
                 <span className="whitespace-nowrap">{t.appName}</span>,

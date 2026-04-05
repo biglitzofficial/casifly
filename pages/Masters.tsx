@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useERP } from '../context/ERPContext';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
@@ -10,6 +10,7 @@ import { CreateCustomerDTO, PGConfig, Rates, Wallet, Account, AccountType, Profi
 import { formatCurrency, safeParseFloat, roundCurrency } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
 import { INITIAL_ACCOUNTS } from '../constants';
+import { buildTransferExpensePerInflowId, isSwipePayInflow, parseSwipeInflowEconomics } from '../lib/swipeTxnEconomics';
 
 type Tab = 'reconcile' | 'customers' | 'wallets' | 'banks' | 'data';
 
@@ -31,6 +32,21 @@ function sumWalletOpeningCapitalFromTransactions(transactions: Transaction[], wa
   return roundCurrency(sum);
 }
 
+/** Posted opening for one wallet ledger from “Opening balance…” journals (Dr/Cr with Q002). */
+function sumPerWalletOpeningFromTransactions(transactions: Transaction[], walletLedgerId: string): number {
+  let sum = 0;
+  for (const t of transactions) {
+    if (t.status !== 'COMPLETED' || t.type !== TransactionType.JOURNAL) continue;
+    if (!/^Opening balance/i.test(t.description.trim())) continue;
+    if (t.entries.length !== 2) continue;
+    const qEntry = t.entries.find((e) => e.accountId === 'Q002');
+    const wEntry = t.entries.find((e) => e.accountId === walletLedgerId);
+    if (!qEntry || !wEntry) continue;
+    sum += wEntry.debit - wEntry.credit;
+  }
+  return roundCurrency(sum);
+}
+
 function WalletCapitalBreakdown({
   wallets,
   accounts,
@@ -46,13 +62,30 @@ function WalletCapitalBreakdown({
   formatCurrency: (amount: number) => string;
   generateProfitAndLoss: () => ProfitAndLoss;
 }) {
-  const rows = [...wallets]
-    .map((w) => ({
-      w,
-      balance: getAccountBalance(w.ledgerAccountId),
-    }))
-    .sort((a, b) => a.w.name.localeCompare(b.w.name));
-  const totalWalletAssets = rows.reduce((s, r) => s + r.balance, 0);
+  const transferByInflow = useMemo(() => buildTransferExpensePerInflowId(transactions), [transactions]);
+
+  const rows = useMemo(() => {
+    return [...wallets]
+      .map((w) => {
+        const opening = sumPerWalletOpeningFromTransactions(transactions, w.ledgerAccountId);
+        let attribNet = 0;
+        for (const t of transactions) {
+          if (t.status !== 'COMPLETED' || t.metadata?.walletId !== w.id) continue;
+          if (!isSwipePayInflow(t)) continue;
+          const econ = parseSwipeInflowEconomics(t, transactions);
+          if (!econ) continue;
+          const te = transferByInflow.get(t.id) ?? 0;
+          attribNet += econ.grossProfit - te;
+        }
+        attribNet = roundCurrency(attribNet);
+        const openingPlusPL = roundCurrency(opening + attribNet);
+        const ledger = getAccountBalance(w.ledgerAccountId);
+        return { w, opening, attribNet, openingPlusPL, ledger };
+      })
+      .sort((a, b) => a.w.name.localeCompare(b.w.name));
+  }, [wallets, transactions, transferByInflow, getAccountBalance]);
+
+  const totalWalletAssets = rows.reduce((s, r) => s + r.ledger, 0);
   const pl = generateProfitAndLoss();
   const netProfit = pl.netProfit;
   const payablesL001 = getAccountBalance('L001');
@@ -105,28 +138,44 @@ function WalletCapitalBreakdown({
           <Landmark size={22} className="shrink-0 opacity-90" />
           <p className="text-sm font-semibold">Live from your ledger — same as Reports / P&amp;L (workbook net profit).</p>
         </div>
+        <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 leading-snug">
+          Per wallet: <strong>Posted opening</strong> is only “Opening balance…” journals for that ledger.
+          <strong> Swipe net (P&amp;L)</strong> sums <strong>Transaction P&amp;L (Swipe Inflow)</strong> net profit for inflows on that wallet (margin recognised + transfer expense split like Reports).
+          <strong> Opening + P&amp;L</strong> is a workbook rollforward; <strong>Ledger balance</strong> is the real balance (also includes payouts, fees, and moves) — subtotals and tie below use <strong>ledger</strong> only.
+        </p>
         <div className="rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-600">
                 <th className="text-left p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Wallet</th>
                 <th className="text-left p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider hidden sm:table-cell">Ledger</th>
-                <th className="text-right p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Balance</th>
+                <th className="text-right p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider hidden md:table-cell">Posted opening</th>
+                <th className="text-right p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider hidden md:table-cell">Swipe net (P&amp;L)</th>
+                <th className="text-right p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Opening + P&amp;L</th>
+                <th className="text-right p-3 font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Ledger balance</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={3} className="p-6 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan={6} className="p-6 text-center text-slate-500 dark:text-slate-400">
                     No wallets in this view.
                   </td>
                 </tr>
               ) : (
-                rows.map(({ w, balance }) => (
+                rows.map(({ w, opening, attribNet, openingPlusPL, ledger }) => (
                   <tr key={w.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
                     <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">{w.name}</td>
                     <td className="p-3 font-mono text-xs text-slate-500 dark:text-slate-400 hidden sm:table-cell">{w.ledgerAccountId}</td>
-                    <td className="p-3 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400 tabular-nums">{formatCurrency(balance)}</td>
+                    <td className="p-3 text-right font-mono text-slate-700 dark:text-slate-300 tabular-nums hidden md:table-cell">{formatCurrency(opening)}</td>
+                    <td className="p-3 text-right font-mono text-emerald-700 dark:text-emerald-400 tabular-nums hidden md:table-cell">{formatCurrency(attribNet)}</td>
+                    <td
+                      className="p-3 text-right font-mono font-semibold text-slate-900 dark:text-slate-100 tabular-nums"
+                      title={`Posted opening (${formatCurrency(opening)}) + swipe Transaction P&L net (${formatCurrency(attribNet)}) for this wallet`}
+                    >
+                      {formatCurrency(openingPlusPL)}
+                    </td>
+                    <td className="p-3 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400 tabular-nums">{formatCurrency(ledger)}</td>
                   </tr>
                 ))
               )}
@@ -178,10 +227,12 @@ function WalletCapitalBreakdown({
               <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">Wallets, receivables, cash &amp; bank</p>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 leading-snug">Cash and bank from the chart of accounts. Bottom <strong>Total · liquid assets</strong> must match the left &quot;Opening + profit + payables&quot; — net profit is included in that left total, not summed again below.</p>
               <div className="space-y-2.5 text-sm">
-                {rows.map(({ w, balance }) => (
-                  <div key={w.id} className="flex justify-between gap-2">
-                    <span className="text-slate-600 dark:text-slate-400 truncate">Wallet · {w.name}</span>
-                    <span className="font-mono font-medium text-slate-900 dark:text-slate-100 tabular-nums shrink-0">{formatCurrency(balance)}</span>
+                {rows.map(({ w, ledger, openingPlusPL }) => (
+                  <div key={w.id} className="flex justify-between gap-2 items-baseline">
+                    <span className="text-slate-600 dark:text-slate-400 truncate" title={`Opening + attrib. P&amp;L: ${formatCurrency(openingPlusPL)}`}>
+                      Wallet · {w.name}
+                    </span>
+                    <span className="font-mono font-medium text-slate-900 dark:text-slate-100 tabular-nums shrink-0">{formatCurrency(ledger)}</span>
                   </div>
                 ))}
                 <div className="flex justify-between gap-2 text-xs text-slate-500 dark:text-slate-400 pt-1 border-t border-dashed border-slate-200 dark:border-slate-600">
