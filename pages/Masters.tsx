@@ -6,22 +6,41 @@ import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent, Input, Button, Select } from '../components/ui/Elements';
 import { PageFilters } from '../components/ui/PageFilters';
 import { Plus, Save, Activity, Users, Wallet as WalletIcon, Edit2, X, List, LayoutGrid, Trash2, Download, Upload, Building2, Landmark } from 'lucide-react';
-import { CreateCustomerDTO, PGConfig, Rates, Wallet, Account, ProfitAndLoss } from '../types';
+import { CreateCustomerDTO, PGConfig, Rates, Wallet, Account, ProfitAndLoss, Transaction, TransactionType } from '../types';
 import { formatCurrency, safeParseFloat, roundCurrency } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
-import { TransactionType } from '../types';
 
 type Tab = 'reconcile' | 'customers' | 'wallets' | 'banks' | 'data';
+
+/**
+ * Net capital from wallet opening entries only: journal Dr wallet ledger / Cr Q002 (and reversals).
+ * Stays fixed unless you add a wallet with opening balance or use “Opening balance adjustment” on a wallet.
+ */
+function sumWalletOpeningCapitalFromTransactions(transactions: Transaction[], walletLedgerIds: Set<string>): number {
+  let sum = 0;
+  for (const t of transactions) {
+    if (t.status !== 'COMPLETED' || t.type !== TransactionType.JOURNAL) continue;
+    if (!t.description.includes('Opening balance')) continue;
+    if (t.entries.length !== 2) continue;
+    const qEntry = t.entries.find((e) => e.accountId === 'Q002');
+    const wEntry = t.entries.find((e) => walletLedgerIds.has(e.accountId));
+    if (!qEntry || !wEntry) continue;
+    sum += qEntry.credit - qEntry.debit;
+  }
+  return roundCurrency(sum);
+}
 
 function WalletCapitalBreakdown({
   wallets,
   accounts,
+  transactions,
   getAccountBalance,
   formatCurrency,
   generateProfitAndLoss,
 }: {
   wallets: Wallet[];
   accounts: Account[];
+  transactions: Transaction[];
   getAccountBalance: (accountId: string) => number;
   formatCurrency: (amount: number) => string;
   generateProfitAndLoss: () => ProfitAndLoss;
@@ -38,15 +57,20 @@ function WalletCapitalBreakdown({
   const payablesL001 = getAccountBalance('L001');
   const l001Account = accounts.find((a) => a.id === 'L001');
   const payablesLabel = l001Account?.name ? `${l001Account.name} (L001)` : 'Customer Paid To (L001)';
-  const capitalResidual = roundCurrency(totalWalletAssets - payablesL001 - netProfit);
-  const sourcesTotal = roundCurrency(capitalResidual + netProfit + payablesL001);
+  const walletLedgerIds = new Set(wallets.map((w) => w.ledgerAccountId));
+  const capitalOpening = sumWalletOpeningCapitalFromTransactions(transactions, walletLedgerIds);
+  const sourcesTotal = roundCurrency(capitalOpening + netProfit + payablesL001);
   const tieOk = Math.abs(sourcesTotal - totalWalletAssets) < 0.02;
+  const receivablesPaySwipe = getAccountBalance('A006');
+  const a006Account = accounts.find((a) => a.id === 'A006');
+  const receivablesShortLabel = a006Account?.name ? `${a006Account.name} (A006)` : 'Customer Receivables (A006)';
+  const totalWalletsPlusReceivables = roundCurrency(totalWalletAssets + receivablesPaySwipe);
 
   return (
     <Card className="border-indigo-100 dark:border-indigo-900/40 shadow-md overflow-hidden">
       <CardHeader
         title="Wallet balances, capital & payables"
-        subtitle="Workbook layout: total wallets = Capital + Profit + Payables when activity stays in wallets and L001. Always visible on this tab."
+        subtitle="Capital = posted opening balances only. Right side includes Pay & Swipe receivables (A006) with wallet balances."
       />
       <CardContent className="!pt-2 !pb-6">
         <div className="flex items-center gap-2 mb-4 text-indigo-700 dark:text-indigo-400">
@@ -91,15 +115,16 @@ function WalletCapitalBreakdown({
           <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
             <strong>Payables</strong> is the ledger balance on L001 (swipe inflow credits here until you record payout outflow).
             <strong className="font-semibold"> Profit</strong> is the same <strong>net P&amp;L</strong> as Reports / Dashboard (workbook rules: deferred portal MDR on unsettled inflows excluded from expenses).
-            <strong className="font-semibold"> Capital</strong> is the remainder so <strong>Capital + Profit + Payables = Total wallet assets</strong>. If you move funds to bank/cash outside wallets, the two sides may not tie exactly.
+            <strong className="font-semibold"> Capital (opening)</strong> is only from <strong>opening balance</strong> journals (new wallet opening or adjustment in Edit wallet). It does <strong>not</strong> move when you record swipes or P&amp;L.
+            <strong className="font-semibold"> Capital + Profit + Payables</strong> is compared to <strong>wallet</strong> totals only. <strong>Receivables (A006)</strong> on the right are Pay &amp; Swipe <strong>advances</strong> (Reports → Transaction P&amp;L → Pay &amp; Swipe) and are separate from payment wallets until recovery.
           </p>
           <div className="grid sm:grid-cols-2 gap-0 rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden">
             <div className="p-4 bg-slate-50/80 dark:bg-slate-800/50 border-b sm:border-b-0 sm:border-r border-slate-200 dark:border-slate-600">
               <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-3">Liabilities &amp; capital</p>
               <div className="space-y-2.5 text-sm">
                 <div className="flex justify-between gap-2">
-                  <span className="text-slate-600 dark:text-slate-400">Capital (residual)</span>
-                  <span className="font-mono font-semibold text-slate-900 dark:text-slate-100 tabular-nums">{formatCurrency(capitalResidual)}</span>
+                  <span className="text-slate-600 dark:text-slate-400">Capital (opening)</span>
+                  <span className="font-mono font-semibold text-slate-900 dark:text-slate-100 tabular-nums">{formatCurrency(capitalOpening)}</span>
                 </div>
                 <div className="flex justify-between gap-2">
                   <span className="text-slate-600 dark:text-slate-400">Profit (P&amp;L net)</span>
@@ -116,7 +141,7 @@ function WalletCapitalBreakdown({
               </div>
             </div>
             <div className="p-4 bg-white dark:bg-slate-900/40">
-              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-3">Wallet assets</p>
+              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-3">Wallets &amp; Pay &amp; Swipe receivables</p>
               <div className="space-y-2.5 text-sm">
                 {rows.map(({ w, balance }) => (
                   <div key={w.id} className="flex justify-between gap-2">
@@ -124,9 +149,19 @@ function WalletCapitalBreakdown({
                     <span className="font-mono font-medium text-slate-900 dark:text-slate-100 tabular-nums shrink-0">{formatCurrency(balance)}</span>
                   </div>
                 ))}
+                <div className="flex justify-between gap-2 text-xs text-slate-500 dark:text-slate-400 pt-1 border-t border-dashed border-slate-200 dark:border-slate-600">
+                  <span>Subtotal · payment wallets</span>
+                  <span className="font-mono tabular-nums">{formatCurrency(totalWalletAssets)}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-600 dark:text-slate-400" title="Pay &amp; Swipe advances (principal still owed by customer until recovery posts)">
+                    Receivables · Pay &amp; Swipe · {receivablesShortLabel}
+                  </span>
+                  <span className="font-mono font-semibold text-violet-700 dark:text-violet-400 tabular-nums shrink-0">{formatCurrency(receivablesPaySwipe)}</span>
+                </div>
                 <div className="flex justify-between gap-2 pt-2.5 mt-1 border-t border-slate-200 dark:border-slate-600 font-bold">
                   <span>Total</span>
-                  <span className="font-mono tabular-nums text-indigo-700 dark:text-indigo-400">{formatCurrency(totalWalletAssets)}</span>
+                  <span className="font-mono tabular-nums text-indigo-700 dark:text-indigo-400">{formatCurrency(totalWalletsPlusReceivables)}</span>
                 </div>
               </div>
             </div>
@@ -139,10 +174,10 @@ function WalletCapitalBreakdown({
             }`}
           >
             {tieOk ? (
-              <span>Capital + Profit + Payables matches total wallet assets.</span>
+              <span>Opening capital + Profit + Payables matches payment <strong>wallet</strong> balances. Receivables (A006) are excluded from this check.</span>
             ) : (
               <span>
-                Totals differ by {formatCurrency(Math.abs(sourcesTotal - totalWalletAssets))} — often bank/cash movements or non-wallet entries. Numbers above are still useful as a guide.
+                Wallet-only totals differ by {formatCurrency(Math.abs(sourcesTotal - totalWalletAssets))} — common when money moves to bank/cash or other ledgers. Receivables (Pay &amp; Swipe) on the right are separate.
               </span>
             )}
           </div>
@@ -791,7 +826,7 @@ const WalletsView = () => {
   const { user } = useAuth();
   const toast = useToast();
   const { confirm } = useConfirm();
-  const { wallets, accounts, updateWallet, deleteWallet, addWallet, addWalletPG, updateWalletPG, removeWalletPG, getAccountBalance, formatCurrency, recordWalletOpeningBalance, generateProfitAndLoss } = useERP();
+  const { wallets, accounts, transactions, updateWallet, deleteWallet, addWallet, addWalletPG, updateWalletPG, removeWalletPG, getAccountBalance, formatCurrency, recordWalletOpeningBalance, generateProfitAndLoss } = useERP();
   const isStoreAdmin = user?.role === 'product_admin';
   const isMasterAdmin = user?.role === 'master_admin';
   /** Same wallets as GET /wallets: global + this store's. Master Admin can change any wallet in the system. */
@@ -998,6 +1033,7 @@ const WalletsView = () => {
       <WalletCapitalBreakdown
         wallets={wallets}
         accounts={accounts}
+        transactions={transactions}
         getAccountBalance={getAccountBalance}
         formatCurrency={formatCurrency}
         generateProfitAndLoss={generateProfitAndLoss}
