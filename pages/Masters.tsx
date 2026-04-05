@@ -90,14 +90,15 @@ function WalletCapitalBreakdown({
     balance: getAccountBalance(a.id),
   }));
   const totalCashBank = cashBankRows.reduce((s, r) => s + r.balance, 0);
-  const totalOperatingAssets = roundCurrency(totalWalletsPlusReceivables + totalCashBank);
-  const tieOk = Math.abs(sourcesTotal - totalOperatingAssets) < 0.02;
+  /** Ledger liquid assets only — same total that must equal opening + profit + payables when books tie. */
+  const liquidAssetsTotal = roundCurrency(totalWalletsPlusReceivables + totalCashBank);
+  const tieOk = Math.abs(sourcesTotal - liquidAssetsTotal) < 0.02;
 
   return (
     <Card className="border-indigo-100 dark:border-indigo-900/40 shadow-md overflow-hidden">
       <CardHeader
         title="Wallet balances, capital & payables"
-        subtitle="Right column includes payment wallets, Pay &amp; Swipe receivables, cash on hand, and banks so it can tally with opening + profit + payables."
+        subtitle="Liquid balances (wallets + receivables + cash + bank) should equal opening + profit + payables. Net profit is not added again here — it is already in that left total."
       />
       <CardContent className="!pt-2 !pb-6">
         <div className="flex items-center gap-2 mb-4 text-indigo-700 dark:text-indigo-400">
@@ -141,7 +142,7 @@ function WalletCapitalBreakdown({
           <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">How the columns relate</p>
           <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
             <strong>Opening capital</strong> counts only journals titled “Opening balance…” (new wallet or Edit wallet → opening adjustment). It does <strong>not</strong> change when you run Swipe &amp; Pay, Pay &amp; Swipe, or move money between wallets.
-            <strong className="font-semibold"> Wallets, receivables (A006), cash, and bank</strong> on the right are liquid / near-cash assets. Together they should tie to <strong>opening + profit + payables</strong> when books are consistent. <strong>Profit</strong> and <strong>Payables</strong> are not opening capital.
+            <strong className="font-semibold"> Wallets, receivables (A006), cash, and bank</strong> are liquid ledger balances. Their <strong>sum</strong> should equal <strong>opening + profit + payables</strong> — the profit (same as Reports → Transaction P&amp;L / Dashboard workbook) is already on the <strong>left</strong>, not double-added on the right. (Swipe inflow <strong>NET PROFIT</strong> is part of that P&amp;L net.)
           </p>
           <div className="grid sm:grid-cols-2 gap-0 rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden">
             <div className="p-4 bg-slate-50/80 dark:bg-slate-800/50 border-b sm:border-b-0 sm:border-r border-slate-200 dark:border-slate-600 space-y-4">
@@ -175,7 +176,7 @@ function WalletCapitalBreakdown({
             </div>
             <div className="p-4 bg-white dark:bg-slate-900/40">
               <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">Wallets, receivables, cash &amp; bank</p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 leading-snug">All chart-of-accounts <strong>Cash</strong> and <strong>Bank</strong> assets (excluding wallet ledgers, listed above). Grand total should match opening + profit + payables.</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 leading-snug">Cash and bank from the chart of accounts. Bottom <strong>Total · liquid assets</strong> must match the left &quot;Opening + profit + payables&quot; — net profit is included in that left total, not summed again below.</p>
               <div className="space-y-2.5 text-sm">
                 {rows.map(({ w, balance }) => (
                   <div key={w.id} className="flex justify-between gap-2">
@@ -206,8 +207,17 @@ function WalletCapitalBreakdown({
                   <span className="font-mono tabular-nums">{formatCurrency(totalCashBank)}</span>
                 </div>
                 <div className="flex justify-between gap-2 pt-2.5 mt-1 border-t border-slate-200 dark:border-slate-600 font-bold">
-                  <span>Total · wallets + receivables + cash + bank</span>
-                  <span className="font-mono tabular-nums text-indigo-700 dark:text-indigo-400">{formatCurrency(totalOperatingAssets)}</span>
+                  <span>Total · liquid assets</span>
+                  <span className="font-mono tabular-nums text-indigo-700 dark:text-indigo-400">{formatCurrency(liquidAssetsTotal)}</span>
+                </div>
+                <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 px-3 py-2.5 space-y-1.5">
+                  <div className="flex justify-between gap-2 text-sm">
+                    <span className="text-slate-600 dark:text-slate-400">Net profit (P&amp;L net, same as left)</span>
+                    <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums">{formatCurrency(netProfit)}</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug">
+                    Same figure as <strong>Swipe Inflow → Transaction P&amp;L</strong> (net profit column) rolled into Dashboard / workbook P&amp;L. It is <strong>already part of</strong> &quot;Opening + profit + payables&quot; — do <strong>not</strong> add it to liquid assets or you double-count. Wallet ledger balances already reflect your flows; profit explains part of the gap between opening and current liquids.
+                  </p>
                 </div>
               </div>
             </div>
@@ -221,11 +231,11 @@ function WalletCapitalBreakdown({
           >
             {tieOk ? (
               <span>
-                <strong>Opening + profit + payables</strong> matches <strong>wallets + receivables + cash + bank</strong>. Opening capital (fixed) is only one part of the left column.
+                <strong>Opening + profit + payables</strong> matches <strong>total liquid assets</strong>. Net profit is counted once — on the left — and mirrored for reference under the liquids total (not added twice).
               </span>
             ) : (
               <span>
-                Left total vs right total differs by {formatCurrency(Math.abs(sourcesTotal - totalOperatingAssets))}. Check missing accounts, other assets, or journals. Opening capital is still only from posted opening journals.
+                Totals differ by {formatCurrency(Math.abs(sourcesTotal - liquidAssetsTotal))}. Fix by checking cash, bank, wallets, payables, or other journals — net profit belongs in the left total, not as an extra add-on to ledger balances.
               </span>
             )}
           </div>
