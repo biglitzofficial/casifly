@@ -6,9 +6,10 @@ import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent, Input, Button, Select } from '../components/ui/Elements';
 import { PageFilters } from '../components/ui/PageFilters';
 import { Plus, Save, Activity, Users, Wallet as WalletIcon, Edit2, X, List, LayoutGrid, Trash2, Download, Upload, Building2, Landmark } from 'lucide-react';
-import { CreateCustomerDTO, PGConfig, Rates, Wallet, Account, ProfitAndLoss, Transaction, TransactionType } from '../types';
+import { CreateCustomerDTO, PGConfig, Rates, Wallet, Account, AccountType, ProfitAndLoss, Transaction, TransactionType } from '../types';
 import { formatCurrency, safeParseFloat, roundCurrency } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
+import { INITIAL_ACCOUNTS } from '../constants';
 
 type Tab = 'reconcile' | 'customers' | 'wallets' | 'banks' | 'data';
 
@@ -60,17 +61,43 @@ function WalletCapitalBreakdown({
   const walletLedgerIds = new Set(wallets.map((w) => w.ledgerAccountId));
   const capitalOpening = sumWalletOpeningCapitalFromTransactions(transactions, walletLedgerIds);
   const sourcesTotal = roundCurrency(capitalOpening + netProfit + payablesL001);
-  const tieOk = Math.abs(sourcesTotal - totalWalletAssets) < 0.02;
   const receivablesPaySwipe = getAccountBalance('A006');
   const a006Account = accounts.find((a) => a.id === 'A006');
   const receivablesShortLabel = a006Account?.name ? `${a006Account.name} (A006)` : 'Customer Receivables (A006)';
   const totalWalletsPlusReceivables = roundCurrency(totalWalletAssets + receivablesPaySwipe);
 
+  const cashBankById = new Map<string, Account>();
+  for (const a of accounts) {
+    if (
+      a.type === AccountType.ASSET &&
+      (a.category === 'Cash' || a.category === 'Bank') &&
+      !walletLedgerIds.has(a.id)
+    ) {
+      cashBankById.set(a.id, a);
+    }
+  }
+  for (const a of INITIAL_ACCOUNTS) {
+    if (a.type !== AccountType.ASSET || (a.category !== 'Cash' && a.category !== 'Bank')) continue;
+    if (walletLedgerIds.has(a.id)) continue;
+    if (!cashBankById.has(a.id)) cashBankById.set(a.id, a as Account);
+  }
+  const cashAndBankAccounts = [...cashBankById.values()].sort((a, b) => {
+    const o = (a.category === 'Cash' ? 0 : 1) - (b.category === 'Cash' ? 0 : 1);
+    return o !== 0 ? o : a.name.localeCompare(b.name);
+  });
+  const cashBankRows = cashAndBankAccounts.map((a) => ({
+    a,
+    balance: getAccountBalance(a.id),
+  }));
+  const totalCashBank = cashBankRows.reduce((s, r) => s + r.balance, 0);
+  const totalOperatingAssets = roundCurrency(totalWalletsPlusReceivables + totalCashBank);
+  const tieOk = Math.abs(sourcesTotal - totalOperatingAssets) < 0.02;
+
   return (
     <Card className="border-indigo-100 dark:border-indigo-900/40 shadow-md overflow-hidden">
       <CardHeader
         title="Wallet balances, capital & payables"
-        subtitle="Opening capital is fixed unless you post an opening adjustment. Swipe, payout, and wallet lines change only the wallets + receivables column."
+        subtitle="Right column includes payment wallets, Pay &amp; Swipe receivables, cash on hand, and banks so it can tally with opening + profit + payables."
       />
       <CardContent className="!pt-2 !pb-6">
         <div className="flex items-center gap-2 mb-4 text-indigo-700 dark:text-indigo-400">
@@ -114,7 +141,7 @@ function WalletCapitalBreakdown({
           <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">How the columns relate</p>
           <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
             <strong>Opening capital</strong> counts only journals titled “Opening balance…” (new wallet or Edit wallet → opening adjustment). It does <strong>not</strong> change when you run Swipe &amp; Pay, Pay &amp; Swipe, or move money between wallets.
-            <strong className="font-semibold"> Wallet balances and A006 receivables</strong> on the right are where that activity shows. <strong>Profit</strong> and <strong>Payables (L001)</strong> below explain P&amp;L and swipe customer float vs payment wallets; they are not opening capital.
+            <strong className="font-semibold"> Wallets, receivables (A006), cash, and bank</strong> on the right are liquid / near-cash assets. Together they should tie to <strong>opening + profit + payables</strong> when books are consistent. <strong>Profit</strong> and <strong>Payables</strong> are not opening capital.
           </p>
           <div className="grid sm:grid-cols-2 gap-0 rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden">
             <div className="p-4 bg-slate-50/80 dark:bg-slate-800/50 border-b sm:border-b-0 sm:border-r border-slate-200 dark:border-slate-600 space-y-4">
@@ -147,12 +174,12 @@ function WalletCapitalBreakdown({
               </div>
             </div>
             <div className="p-4 bg-white dark:bg-slate-900/40">
-              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">Wallets &amp; Pay &amp; Swipe receivables</p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 leading-snug">Payment-wallet activity and Pay &amp; Swipe advances (A006) — not opening capital.</p>
+              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">Wallets, receivables, cash &amp; bank</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 leading-snug">All chart-of-accounts <strong>Cash</strong> and <strong>Bank</strong> assets (excluding wallet ledgers, listed above). Grand total should match opening + profit + payables.</p>
               <div className="space-y-2.5 text-sm">
                 {rows.map(({ w, balance }) => (
                   <div key={w.id} className="flex justify-between gap-2">
-                    <span className="text-slate-600 dark:text-slate-400 truncate">{w.name}</span>
+                    <span className="text-slate-600 dark:text-slate-400 truncate">Wallet · {w.name}</span>
                     <span className="font-mono font-medium text-slate-900 dark:text-slate-100 tabular-nums shrink-0">{formatCurrency(balance)}</span>
                   </div>
                 ))}
@@ -166,9 +193,21 @@ function WalletCapitalBreakdown({
                   </span>
                   <span className="font-mono font-semibold text-violet-700 dark:text-violet-400 tabular-nums shrink-0">{formatCurrency(receivablesPaySwipe)}</span>
                 </div>
+                {cashBankRows.map(({ a, balance }) => (
+                  <div key={a.id} className="flex justify-between gap-2">
+                    <span className="text-slate-600 dark:text-slate-400 truncate">
+                      {a.category === 'Cash' ? 'Cash' : 'Bank'} · {a.name} <span className="font-mono text-xs text-slate-400">({a.id})</span>
+                    </span>
+                    <span className="font-mono font-medium text-sky-800 dark:text-sky-300 tabular-nums shrink-0">{formatCurrency(balance)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between gap-2 text-xs text-slate-500 dark:text-slate-400 pt-1 border-t border-dashed border-slate-200 dark:border-slate-600">
+                  <span>Subtotal · cash &amp; bank</span>
+                  <span className="font-mono tabular-nums">{formatCurrency(totalCashBank)}</span>
+                </div>
                 <div className="flex justify-between gap-2 pt-2.5 mt-1 border-t border-slate-200 dark:border-slate-600 font-bold">
-                  <span>Total</span>
-                  <span className="font-mono tabular-nums text-indigo-700 dark:text-indigo-400">{formatCurrency(totalWalletsPlusReceivables)}</span>
+                  <span>Total · wallets + receivables + cash + bank</span>
+                  <span className="font-mono tabular-nums text-indigo-700 dark:text-indigo-400">{formatCurrency(totalOperatingAssets)}</span>
                 </div>
               </div>
             </div>
@@ -182,11 +221,11 @@ function WalletCapitalBreakdown({
           >
             {tieOk ? (
               <span>
-                <strong>Opening capital</strong> is separate from this check. The row “Opening + profit + payables” matches payment <strong>wallet</strong> balances. Receivables (A006) stay on the right only.
+                <strong>Opening + profit + payables</strong> matches <strong>wallets + receivables + cash + bank</strong>. Opening capital (fixed) is only one part of the left column.
               </span>
             ) : (
               <span>
-                “Opening + profit + payables” vs payment wallets differs by {formatCurrency(Math.abs(sourcesTotal - totalWalletAssets))} — often bank/cash. Opening capital itself is unchanged by wallet lines; receivables (A006) are on the right.
+                Left total vs right total differs by {formatCurrency(Math.abs(sourcesTotal - totalOperatingAssets))}. Check missing accounts, other assets, or journals. Opening capital is still only from posted opening journals.
               </span>
             )}
           </div>
