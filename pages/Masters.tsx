@@ -20,7 +20,7 @@ function sumWalletOpeningCapitalFromTransactions(transactions: Transaction[], wa
   let sum = 0;
   for (const t of transactions) {
     if (t.status !== 'COMPLETED' || t.type !== TransactionType.JOURNAL) continue;
-    if (!t.description.includes('Opening balance')) continue;
+    if (!/^Opening balance/i.test(t.description.trim())) continue;
     if (t.entries.length !== 2) continue;
     const qEntry = t.entries.find((e) => e.accountId === 'Q002');
     const wEntry = t.entries.find((e) => walletLedgerIds.has(e.accountId));
@@ -70,7 +70,7 @@ function WalletCapitalBreakdown({
     <Card className="border-indigo-100 dark:border-indigo-900/40 shadow-md overflow-hidden">
       <CardHeader
         title="Wallet balances, capital & payables"
-        subtitle="Capital = posted opening balances only. Right side includes Pay & Swipe receivables (A006) with wallet balances."
+        subtitle="Opening capital is fixed unless you post an opening adjustment. Swipe, payout, and wallet lines change only the wallets + receivables column."
       />
       <CardContent className="!pt-2 !pb-6">
         <div className="flex items-center gap-2 mb-4 text-indigo-700 dark:text-indigo-400">
@@ -111,37 +111,44 @@ function WalletCapitalBreakdown({
         </div>
 
         <div className="mt-6 space-y-3">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Capital, profit &amp; payables</p>
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">How the columns relate</p>
           <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-            <strong>Payables</strong> is the ledger balance on L001 (swipe inflow credits here until you record payout outflow).
-            <strong className="font-semibold"> Profit</strong> is the same <strong>net P&amp;L</strong> as Reports / Dashboard (workbook rules: deferred portal MDR on unsettled inflows excluded from expenses).
-            <strong className="font-semibold"> Capital (opening)</strong> is only from <strong>opening balance</strong> journals (new wallet opening or adjustment in Edit wallet). It does <strong>not</strong> move when you record swipes or P&amp;L.
-            <strong className="font-semibold"> Capital + Profit + Payables</strong> is compared to <strong>wallet</strong> totals only. <strong>Receivables (A006)</strong> on the right are Pay &amp; Swipe <strong>advances</strong> (Reports → Transaction P&amp;L → Pay &amp; Swipe) and are separate from payment wallets until recovery.
+            <strong>Opening capital</strong> counts only journals titled “Opening balance…” (new wallet or Edit wallet → opening adjustment). It does <strong>not</strong> change when you run Swipe &amp; Pay, Pay &amp; Swipe, or move money between wallets.
+            <strong className="font-semibold"> Wallet balances and A006 receivables</strong> on the right are where that activity shows. <strong>Profit</strong> and <strong>Payables (L001)</strong> below explain P&amp;L and swipe customer float vs payment wallets; they are not opening capital.
           </p>
           <div className="grid sm:grid-cols-2 gap-0 rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden">
-            <div className="p-4 bg-slate-50/80 dark:bg-slate-800/50 border-b sm:border-b-0 sm:border-r border-slate-200 dark:border-slate-600">
-              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-3">Liabilities &amp; capital</p>
-              <div className="space-y-2.5 text-sm">
-                <div className="flex justify-between gap-2">
-                  <span className="text-slate-600 dark:text-slate-400">Capital (opening)</span>
-                  <span className="font-mono font-semibold text-slate-900 dark:text-slate-100 tabular-nums">{formatCurrency(capitalOpening)}</span>
+            <div className="p-4 bg-slate-50/80 dark:bg-slate-800/50 border-b sm:border-b-0 sm:border-r border-slate-200 dark:border-slate-600 space-y-4">
+              <div className="rounded-lg border border-indigo-200/80 dark:border-indigo-900/60 bg-indigo-50/60 dark:bg-indigo-950/25 px-3 py-3">
+                <p className="text-[10px] font-bold text-indigo-700 dark:text-indigo-400 uppercase tracking-widest mb-2">Opening capital — fixed</p>
+                <div className="flex justify-between gap-2 text-sm">
+                  <span className="text-slate-700 dark:text-slate-300 font-medium">Posted opening only</span>
+                  <span className="font-mono font-bold text-slate-900 dark:text-slate-100 tabular-nums">{formatCurrency(capitalOpening)}</span>
                 </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-slate-600 dark:text-slate-400">Profit (P&amp;L net)</span>
-                  <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums">{formatCurrency(netProfit)}</span>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <span className="text-slate-600 dark:text-slate-400">Payables · {payablesLabel}</span>
-                  <span className="font-mono font-semibold text-amber-800 dark:text-amber-300 tabular-nums">{formatCurrency(payablesL001)}</span>
-                </div>
-                <div className="flex justify-between gap-2 pt-2.5 mt-1 border-t border-slate-200 dark:border-slate-600 font-bold">
-                  <span>Total</span>
-                  <span className="font-mono tabular-nums">{formatCurrency(sourcesTotal)}</span>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-2 leading-snug">
+                  Not affected by wallet transactions. Changes only if you post another opening balance journal in Masters.
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-3">Operating · P&amp;L &amp; payables</p>
+                <div className="space-y-2.5 text-sm">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-600 dark:text-slate-400">Profit (P&amp;L net)</span>
+                    <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums">{formatCurrency(netProfit)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-600 dark:text-slate-400">Payables · {payablesLabel}</span>
+                    <span className="font-mono font-semibold text-amber-800 dark:text-amber-300 tabular-nums">{formatCurrency(payablesL001)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2 pt-2.5 mt-1 border-t border-slate-200 dark:border-slate-600 font-bold">
+                    <span>Opening + profit + payables</span>
+                    <span className="font-mono tabular-nums">{formatCurrency(sourcesTotal)}</span>
+                  </div>
                 </div>
               </div>
             </div>
             <div className="p-4 bg-white dark:bg-slate-900/40">
-              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-3">Wallets &amp; Pay &amp; Swipe receivables</p>
+              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">Wallets &amp; Pay &amp; Swipe receivables</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3 leading-snug">Payment-wallet activity and Pay &amp; Swipe advances (A006) — not opening capital.</p>
               <div className="space-y-2.5 text-sm">
                 {rows.map(({ w, balance }) => (
                   <div key={w.id} className="flex justify-between gap-2">
@@ -174,10 +181,12 @@ function WalletCapitalBreakdown({
             }`}
           >
             {tieOk ? (
-              <span>Opening capital + Profit + Payables matches payment <strong>wallet</strong> balances. Receivables (A006) are excluded from this check.</span>
+              <span>
+                <strong>Opening capital</strong> is separate from this check. The row “Opening + profit + payables” matches payment <strong>wallet</strong> balances. Receivables (A006) stay on the right only.
+              </span>
             ) : (
               <span>
-                Wallet-only totals differ by {formatCurrency(Math.abs(sourcesTotal - totalWalletAssets))} — common when money moves to bank/cash or other ledgers. Receivables (Pay &amp; Swipe) on the right are separate.
+                “Opening + profit + payables” vs payment wallets differs by {formatCurrency(Math.abs(sourcesTotal - totalWalletAssets))} — often bank/cash. Opening capital itself is unchanged by wallet lines; receivables (A006) are on the right.
               </span>
             )}
           </div>
