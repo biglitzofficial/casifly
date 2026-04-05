@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useERP } from '../context/ERPContext';
 import { useToast } from '../context/ToastContext';
 import { Layout } from '../components/Layout';
-import { LedgerEntry, TransactionType, Transaction, Rates, Customer } from '../types';
+import { LedgerEntry, TransactionType, Transaction, Rates, Customer, PGConfig } from '../types';
 import {
   isSwipePayInflow,
   isSwipeInflowMarginSettledInBooks,
@@ -12,6 +12,21 @@ import { Card, CardContent, CardHeader, Input, Select, Button } from '../compone
 import { safeParseFloat, roundCurrency } from '../lib/utils';
 import { DEFAULT_COMMISSION_RATES } from '../constants';
 import { ArrowRight, ArrowDownToLine, ArrowUpFromLine, Lock, Unlock, CheckCircle2, Info, UserPlus, Save, X, Users } from 'lucide-react';
+
+/** Coerce wallet/API PG charge values (number or string) to a safe rate. */
+function coercePgRate(v: unknown): number {
+  if (v === null || v === undefined || v === '') return 0;
+  const n = typeof v === 'number' && Number.isFinite(v) ? v : safeParseFloat(String(v));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Use Masters → Wallets PG card-wise % only (normalized keys visa/master/amex/rupay). */
+function portalPctFromPg(pg: PGConfig | undefined, cardType: string): number {
+  if (!pg?.charges) return 0;
+  const c = pg.charges as Record<string, unknown>;
+  const raw = c[cardType as keyof Rates as string];
+  return roundCurrency(coercePgRate(raw));
+}
 
 export const SwipePay: React.FC = () => {
   const { customers, wallets, transactions, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer } = useERP();
@@ -36,7 +51,6 @@ export const SwipePay: React.FC = () => {
   const [cardType, setCardType] = useState('visa');
   const [swipeAmount, setSwipeAmount] = useState<string>('');
   const [currentServiceRate, setCurrentServiceRate] = useState<string>('0');
-  const [appliedPortalRate, setAppliedPortalRate] = useState<string>('0'); // Wallet PG charge % - manual override
 
   // --- Step 2: Outflow / Payout Details ---
   const [outflowWalletId, setOutflowWalletId] = useState(wallets[0]?.id || ''); // Pay FROM this wallet (money leaves wallet)
@@ -122,13 +136,6 @@ export const SwipePay: React.FC = () => {
     if (!unsettledInflows.some((t) => t.id === linkedInflowId)) setLinkedInflowId('');
   }, [unsettledInflows, linkedInflowId]);
 
-  // Sync Wallet PG Charge % from selected PG when wallet/pg/card changes
-  useEffect(() => {
-    const pg = selectedWallet?.pgs.find(p => p.name === pgName) || selectedWallet?.pgs[0];
-    const mdr = (pg?.charges as any)?.[cardType] ?? 0;
-    setAppliedPortalRate(String(mdr));
-  }, [swipeWalletId, pgName, cardType, selectedWallet]);
-
   const handlePhoneSearch = () => {
     if (phone.length !== 10) return;
     const found = customers.find(c => c.phone === phone);
@@ -197,14 +204,19 @@ export const SwipePay: React.FC = () => {
     }
   };
 
-  // Calculations
-  const selectedPG = selectedWallet?.pgs.find(p => p.name === pgName) || selectedWallet?.pgs[0];
+  // Calculations — portal % always from Masters → Wallets for the selected PG + card (not customer commission).
+  const selectedPG =
+    !selectedWallet?.pgs?.length
+      ? undefined
+      : pgName
+        ? selectedWallet.pgs.find((p) => p.name === pgName)
+        : selectedWallet.pgs[0];
+  const resolvedPortalPct = portalPctFromPg(selectedPG, cardType);
   const amountVal = safeParseFloat(swipeAmount);
   const serviceRateVal = safeParseFloat(currentServiceRate);
   const serviceFeeAmount = roundCurrency((amountVal * serviceRateVal) / 100);
 
-  const portalRateVal = safeParseFloat(appliedPortalRate); // Manual entry, synced from PG
-  const portalFeeAmount = roundCurrency((amountVal * portalRateVal) / 100);
+  const portalFeeAmount = roundCurrency((amountVal * resolvedPortalPct) / 100);
 
   const netPayableToCustomer = roundCurrency(amountVal - serviceFeeAmount);
   const estimatedProfit = roundCurrency(serviceFeeAmount - portalFeeAmount);
@@ -223,10 +235,17 @@ export const SwipePay: React.FC = () => {
     if (isNaN(rateVal) || rateVal < 0 || rateVal > 100) err.currentServiceRate = 'Rate must be between 0 and 100%';
     setStep1Errors(err);
     if (Object.keys(err).length > 0 || !selectedWallet || !customerId) return;
-    if (!selectedWallet.pgs?.length || !selectedPG) {
+    if (!selectedWallet.pgs?.length) {
       toast.error('This wallet has no payment gateway. Add one in Masters → Wallets.');
       return;
     }
+    const pgForPost = pgName ? selectedWallet.pgs.find((p) => p.name === pgName) : undefined;
+    if (!pgForPost) {
+      toast.error('Select a payment gateway for this inflow.');
+      return;
+    }
+    const portalPctPosted = portalPctFromPg(pgForPost, cardType);
+    const portalFeePosted = roundCurrency((amountVal * portalPctPosted) / 100);
 
     setInflowLoading(true);
     try {
@@ -244,8 +263,8 @@ export const SwipePay: React.FC = () => {
     const inflowEntries: LedgerEntry[] = [
       { accountId: selectedWallet.ledgerAccountId, debit: amountVal, credit: 0 },
       { accountId: 'L001', debit: 0, credit: amountVal },
-      { accountId: 'E001', debit: portalFeeAmount, credit: 0 },
-      { accountId: selectedWallet.ledgerAccountId, debit: 0, credit: portalFeeAmount },
+      { accountId: 'E001', debit: portalFeePosted, credit: 0 },
+      { accountId: selectedWallet.ledgerAccountId, debit: 0, credit: portalFeePosted },
       { accountId: 'L001', debit: serviceFeeAmount, credit: 0 },
       { accountId: 'L003', debit: 0, credit: serviceFeeAmount }
     ];
@@ -257,7 +276,7 @@ export const SwipePay: React.FC = () => {
           customerId: customerId || undefined,
           walletId: selectedWallet.id,
           cardType: cardType,
-          pgName: selectedPG?.name,
+          pgName: pgForPost.name,
         }
       );
       if (p && typeof (p as Promise<unknown>).then === 'function') await p;
@@ -490,8 +509,8 @@ export const SwipePay: React.FC = () => {
                         <Input label="Swipe Amount (₹)" type="number" className="text-xl font-bold" value={swipeAmount} onChange={e => { setSwipeAmount(e.target.value); setStep1Errors(p => ({...p, swipeAmount: ''})); }} error={step1Errors.swipeAmount} placeholder="0" />
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <Input label="Applied Rate %" type="number" step="0.1" value={currentServiceRate} onChange={e => { setCurrentServiceRate(e.target.value); setStep1Errors(p => ({...p, currentServiceRate: ''})); }} error={step1Errors.currentServiceRate} />
-                        <Input label="Wallet PG Charge %" type="number" step="0.1" value={appliedPortalRate} onChange={e => setAppliedPortalRate(e.target.value)} placeholder="e.g. 0.5" title="Payment gateway MDR % – pre-filled from wallet, editable for overrides" />
+                        <Input label="Customer shop charge %" type="number" step="0.1" value={currentServiceRate} onChange={e => { setCurrentServiceRate(e.target.value); setStep1Errors(p => ({...p, currentServiceRate: ''})); }} error={step1Errors.currentServiceRate} title="Commission to customer for this card — not the PG MDR" />
+                        <Input label={`Wallet PG MDR % (${selectedPG?.name ?? 'PG'})`} type="number" step="0.01" value={String(resolvedPortalPct)} readOnly className="bg-slate-50 dark:bg-slate-800/60 cursor-not-allowed" title="From Masters → Wallets for this payment gateway and card type. Edit there to change." />
                       </div>
                       <Button type="submit" size="lg" className="w-full h-14 text-lg" loading={inflowLoading}>Process Inflow <ArrowRight size={20}/></Button>
                     </form>
@@ -668,7 +687,7 @@ export const SwipePay: React.FC = () => {
                      <span className="text-2xl font-black text-white tabular-nums">{formatCurrency(amountVal)}</span>
                    </div>
                    <div className="flex justify-between items-center">
-                     <span className="text-base font-semibold text-rose-300">Portal Fee ({portalRateVal}%)</span>
+                     <span className="text-base font-semibold text-rose-300">Portal Fee ({resolvedPortalPct}%)</span>
                      <span className="text-lg font-bold text-white tabular-nums">-{formatCurrency(portalFeeAmount)}</span>
                    </div>
                    <div className="flex justify-between items-center pb-5 border-b-2 border-slate-600">
