@@ -289,6 +289,10 @@ export const PaySwipe: React.FC = () => {
     if (isNaN(coll) || coll < 0) err.collectionAmount = 'Charges collected must be 0 or more';
     const rateVal = safeParseFloat(currentCommRate);
     if (isNaN(rateVal) || rateVal < 0 || rateVal > 100) err.currentCommRate = 'Rate must be between 0 and 100%';
+    const mdrVal = safeParseFloat(appliedMdrPercent);
+    if (appliedMdrPercent !== '' && (isNaN(mdrVal) || mdrVal < 0 || mdrVal > 100)) {
+      err.appliedMdrPercent = 'Applied MDR must be between 0 and 100%';
+    }
     setRecoveryErrors(err);
     return Object.keys(err).length === 0;
   };
@@ -517,13 +521,18 @@ export const PaySwipe: React.FC = () => {
                     onChange={e => { setCurrentCommRate(e.target.value); setRecoveryErrors(p => ({...p, currentCommRate: ''})); }} 
                     error={recoveryErrors.currentCommRate}
                   />
-                  <Input 
-                    label="Applied MDR %" 
-                    type="number" 
-                    step="0.1" 
-                    value={appliedMdrPercent} 
-                    onChange={e => setAppliedMdrPercent(e.target.value)} 
-                    disabled
+                  <Input
+                    label="Applied MDR %"
+                    type="number"
+                    step="0.1"
+                    value={appliedMdrPercent}
+                    onChange={(e) => {
+                      setAppliedMdrPercent(e.target.value);
+                      setRecoveryErrors((p) => ({ ...p, appliedMdrPercent: '' }));
+                    }}
+                    error={recoveryErrors.appliedMdrPercent}
+                    placeholder="e.g. 1.2"
+                    title="Pre-filled from the wallet payment gateway for this card; edit for one-off portal rates"
                   />
                 </div>
 
