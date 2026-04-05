@@ -2,14 +2,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useERP } from '../context/ERPContext';
 import { useToast } from '../context/ToastContext';
 import { Layout } from '../components/Layout';
-import { AccountType, LedgerEntry, TransactionType, Rates } from '../types';
+import { AccountType, LedgerEntry, TransactionType, Rates, Customer } from '../types';
 import { Card, CardContent, Input, Select, Button } from '../components/ui/Elements';
 import { safeParseFloat, roundCurrency } from '../lib/utils';
-import { ArrowRight, CheckCircle2, Search } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Search, Users } from 'lucide-react';
 import { DEFAULT_COMMISSION_RATES, INITIAL_ACCOUNTS } from '../constants';
+import { customerPaySwipeReceivableOutstanding } from '../lib/paySwipeTxnReport';
 
 export const PaySwipe: React.FC = () => {
-  const { customers, wallets, accounts, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer } = useERP();
+  const { customers, wallets, accounts, transactions, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer } = useERP();
   const toast = useToast();
   const [mode, setMode] = useState<'advance' | 'recovery'>('advance');
 
@@ -35,6 +36,7 @@ export const PaySwipe: React.FC = () => {
   const [collectAccount, setCollectAccount] = useState('A001');
   const [appliedMdrPercent, setAppliedMdrPercent] = useState<string>('0');
   const [currentCommRate, setCurrentCommRate] = useState<string>('0');
+  const [recoveryPickerQuery, setRecoveryPickerQuery] = useState('');
 
   const resetForm = () => {
     setPhone('');
@@ -46,6 +48,7 @@ export const PaySwipe: React.FC = () => {
     setCollectionAmount('');
     setErrors({});
     setRecoveryErrors({});
+    setRecoveryPickerQuery('');
   };
 
 
@@ -229,6 +232,49 @@ export const PaySwipe: React.FC = () => {
     setRecoveryAmount('');
     setCollectionAmount('');
     setRecoveryErrors({});
+    setRecoveryPickerQuery('');
+  };
+
+  const customersWithReceivable = useMemo(() => {
+    return customers
+      .map((c) => ({
+        customer: c,
+        outstanding: customerPaySwipeReceivableOutstanding(c.id, transactions),
+      }))
+      .filter((r) => r.outstanding > 0.005)
+      .sort((a, b) => b.outstanding - a.outstanding);
+  }, [customers, transactions]);
+
+  const filteredReceivableCustomers = useMemo(() => {
+    const raw = recoveryPickerQuery.trim();
+    const q = raw.toLowerCase();
+    const digits = raw.replace(/\D/g, '');
+    if (!q && !digits) return customersWithReceivable;
+    return customersWithReceivable.filter(({ customer: c }) => {
+      const nameMatch = q.length > 0 && c.name.toLowerCase().includes(q);
+      const phoneMatch = digits.length > 0 && c.phone.includes(digits);
+      return nameMatch || phoneMatch;
+    });
+  }, [customersWithReceivable, recoveryPickerQuery]);
+
+  const selectRecoveryCustomer = (cust: Customer) => {
+    setCustomerId(cust.id);
+    setCustomerName(cust.name);
+    setPhone(cust.phone);
+    setCommissionRates({ ...cust.commissionRates });
+    setIsNewCustomer(false);
+    setRecoveryPickerQuery('');
+    setRecoveryErrors({});
+  };
+
+  const clearRecoveryCustomerSelection = () => {
+    setCustomerId(null);
+    setCustomerName('');
+    setPhone('');
+    setIsNewCustomer(false);
+    setCommissionRates(DEFAULT_COMMISSION_RATES);
+    setRecoveryPickerQuery('');
+    setRecoveryErrors({});
   };
 
   const validateRecovery = (): boolean => {
@@ -345,27 +391,97 @@ export const PaySwipe: React.FC = () => {
               </form>
             ) : (
               <form onSubmit={handleRecovery} className="space-y-6">
-                <div className="bg-slate-50/80 p-5 rounded-xl border border-slate-200 space-y-4">
-                  <div className="relative">
-                    <Input label="Customer Phone" value={phone} onChange={(e) => handlePhoneChange(e.target.value)} onBlur={handlePhoneBlur} placeholder="10-digit phone" error={recoveryErrors.phone} maxLength={10} />
-                    <div className="absolute right-4 top-10 text-slate-400 pointer-events-none"><Search size={16}/></div>
-                  </div>
-                  {customerId && !isNewCustomer && (
-                    <div className="p-4 bg-white rounded-xl border border-emerald-200 flex justify-between items-center">
-                      <div>
-                        <p className="text-xs text-slate-500 font-bold uppercase">Linked Profile</p>
-                        <p className="font-bold text-slate-900">{customerName}</p>
+                {!customerId || isNewCustomer ? (
+                  <div className="space-y-4">
+                    <div className="p-4 bg-emerald-50/90 rounded-xl border border-emerald-100 flex gap-3 items-start">
+                      <Users className="text-emerald-700 shrink-0 mt-0.5" size={20} />
+                      <div className="text-sm text-emerald-900">
+                        <p className="font-bold">Customers with Pay &amp; Swipe receivable</p>
+                        <p className="text-emerald-800/90 mt-1">
+                          Advance principal still on receivables (A006). Same idea as Swipe &amp; Pay outflow: pick who you are recovering for, then complete the swipe details.
+                        </p>
                       </div>
-                      <CheckCircle2 className="text-emerald-600" size={20}/>
                     </div>
-                  )}
-                  {isNewCustomer && (
-                    <p className="text-sm text-amber-600 font-medium">Customer not found. Create via Pay Advance first.</p>
-                  )}
-                </div>
-
-                {customerId && !isNewCustomer && (
+                    <Input
+                      label="Filter by name or phone"
+                      placeholder="Search…"
+                      value={recoveryPickerQuery}
+                      onChange={(e) => setRecoveryPickerQuery(e.target.value)}
+                      className="font-medium"
+                    />
+                    <div className="max-h-[min(24rem,50vh)] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                      {filteredReceivableCustomers.length === 0 ? (
+                        <p className="p-4 text-sm text-slate-600">
+                          {customersWithReceivable.length === 0
+                            ? 'No outstanding receivables. Record Pay Advance first, then recover here.'
+                            : 'No customers match your search.'}
+                        </p>
+                      ) : (
+                        <ul className="divide-y divide-slate-100">
+                          {filteredReceivableCustomers.map(({ customer: c, outstanding }) => (
+                            <li key={c.id}>
+                              <button
+                                type="button"
+                                onClick={() => selectRecoveryCustomer(c)}
+                                className="w-full text-left px-4 py-3.5 hover:bg-emerald-50/90 transition-colors flex flex-wrap items-center justify-between gap-3"
+                              >
+                                <div>
+                                  <p className="font-bold text-slate-900">{c.name}</p>
+                                  <p className="text-sm font-mono text-slate-500 tracking-tight">{c.phone}</p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <p className="text-xs font-bold text-emerald-800 uppercase tracking-wide">Receivable outstanding</p>
+                                  <p className="text-sm font-mono font-semibold text-slate-800 tabular-nums mt-0.5">{formatCurrency(outstanding)}</p>
+                                </div>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div className="p-5 bg-slate-50/80 rounded-xl border border-slate-200 space-y-3">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Or search by phone</p>
+                      <div className="relative">
+                        <Input
+                          label="Customer Phone"
+                          value={phone}
+                          onChange={(e) => handlePhoneChange(e.target.value)}
+                          onBlur={handlePhoneBlur}
+                          placeholder="10-digit phone"
+                          error={recoveryErrors.phone}
+                          maxLength={10}
+                        />
+                        <div className="absolute right-4 top-10 text-slate-400 pointer-events-none">
+                          <Search size={16} />
+                        </div>
+                      </div>
+                      {isNewCustomer && phone.length === 10 && (
+                        <p className="text-sm text-amber-600 font-medium">Customer not found. Create via Pay Advance first.</p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
                   <>
+                    <div className="p-5 bg-slate-50/80 rounded-xl border border-slate-200 space-y-4">
+                      <div className="p-4 bg-white rounded-xl border border-emerald-200 flex justify-between items-start gap-3">
+                        <div>
+                          <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Selected customer</p>
+                          <p className="font-bold text-slate-900">{customerName}</p>
+                          <p className="text-sm font-mono text-slate-600 mt-0.5">{phone}</p>
+                          <p className="text-xs text-slate-600 mt-2">
+                            Receivable outstanding:{' '}
+                            <span className="font-mono font-semibold text-emerald-800 tabular-nums">
+                              {formatCurrency(customerPaySwipeReceivableOutstanding(customerId, transactions))}
+                            </span>
+                          </p>
+                        </div>
+                        <CheckCircle2 className="text-emerald-600 shrink-0" size={22} />
+                      </div>
+                      <Button type="button" variant="outline" onClick={clearRecoveryCustomerSelection} className="w-full sm:w-auto">
+                        Change customer
+                      </Button>
+                    </div>
+
                 <div>
                   <Input label="Amount to be swiped — principal (₹)" type="number" className="font-bold text-lg" value={recoveryAmount} onChange={e => { setRecoveryAmount(e.target.value); setRecoveryErrors(p => ({...p, recoveryAmount: ''})); }} error={recoveryErrors.recoveryAmount} placeholder="0" />
                   <p className="text-xs text-slate-500 mt-1.5 font-medium">Gross card amount cleared from receivables (same as <strong>Principal</strong> in Transaction P&amp;L).</p>

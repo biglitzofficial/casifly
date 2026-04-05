@@ -15,6 +15,21 @@ export function isPaySwipeRecovery(t: Transaction): boolean {
   return t.type === TransactionType.PAY_SWIPE && t.status === 'COMPLETED' && /^Recovery:/i.test(t.description.trim());
 }
 
+/** Outstanding Pay & Swipe receivable for one customer (A006): advances minus recoveries, from posted txns. */
+export function customerPaySwipeReceivableOutstanding(customerId: string, transactions: Transaction[]): number {
+  let bal = 0;
+  for (const t of transactions) {
+    if (t.status !== 'COMPLETED' || t.type !== TransactionType.PAY_SWIPE) continue;
+    if (t.metadata?.customerId !== customerId) continue;
+    if (isPaySwipeAdvance(t)) {
+      bal += sumAcct(t.entries, 'A006', 'debit');
+    } else if (isPaySwipeRecovery(t)) {
+      bal -= sumAcct(t.entries, 'A006', 'credit');
+    }
+  }
+  return roundCurrency(bal);
+}
+
 export type PaySwipePLRow = {
   id: string;
   raw: Transaction;
