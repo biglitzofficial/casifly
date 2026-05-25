@@ -12,6 +12,9 @@ import { Card, CardContent, CardHeader, Input, Select, Button } from '../compone
 import { safeParseFloat, roundCurrency } from '../lib/utils';
 import { DEFAULT_COMMISSION_RATES } from '../constants';
 import { ArrowRight, ArrowDownToLine, ArrowUpFromLine, Lock, Unlock, CheckCircle2, Info, UserPlus, Save, X, Users } from 'lucide-react';
+import { TypedRecentTransactionsCard } from '../components/TypedRecentTransactionsCard';
+import { TransactionEditModal } from '../components/TransactionEditModal';
+import { TEMP_ALLOW_LEDGER_REPORT_PL_EDIT } from '../lib/tempUiFlags';
 
 /** Coerce wallet/API PG charge values (number or string) to a safe rate. */
 function coercePgRate(v: unknown): number {
@@ -29,7 +32,7 @@ function portalPctFromPg(pg: PGConfig | undefined, cardType: string): number {
 }
 
 export const SwipePay: React.FC = () => {
-  const { customers, wallets, transactions, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer } = useERP();
+  const { customers, wallets, transactions, accounts, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer, updateTransaction } = useERP();
   const toast = useToast();
 
   // --- Mode: Inflow or Outflow (separate entries) ---
@@ -62,6 +65,13 @@ export const SwipePay: React.FC = () => {
   const [createCustLoading, setCreateCustLoading] = useState(false);
   const [linkedInflowId, setLinkedInflowId] = useState('');
   const [outflowPickerQuery, setOutflowPickerQuery] = useState('');
+  const [editingTxn, setEditingTxn] = useState<Transaction | null>(null);
+
+  /** All Swipe & Pay journals — shown below the workflow for audit / correction. */
+  const swipePayList = useMemo(
+    () => transactions.filter((t) => t.type === TransactionType.SWIPE_PAY),
+    [transactions],
+  );
 
   /** All swipe inflows still awaiting linked payout (margin in L003). */
   const allPendingSwipeInflows = useMemo(
@@ -737,6 +747,33 @@ export const SwipePay: React.FC = () => {
           )}
         </div>
 
+      </div>
+
+      <div className="max-w-6xl mx-auto w-full px-1">
+        <TypedRecentTransactionsCard
+          title="Recent Swipe &amp; Pay transactions"
+          subtitle="Inflow (card swipe entries) and outflow (payouts linked to customer). Edits persist to the ledger and reports when you save."
+          items={swipePayList}
+          formatCurrency={formatCurrency}
+          customerNameForTxn={(t) =>
+            (t.metadata?.customerId ? customers.find((c) => c.id === t.metadata!.customerId)?.name : undefined)
+          }
+          subtitleForTxn={(t) =>
+            wallets.find((w) => w.id === t.metadata?.walletId)?.name ??
+            (isSwipePayInflow(t) ? 'Inflow / swipe' : 'Outflow / payout')
+          }
+          onEditTxn={(t) => setEditingTxn(t)}
+        />
+
+        {editingTxn && TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? (
+          <TransactionEditModal
+            transaction={editingTxn}
+            accounts={accounts}
+            formatCurrency={formatCurrency}
+            onClose={() => setEditingTxn(null)}
+            onSave={(id, patch) => updateTransaction(id, patch)}
+          />
+        ) : null}
       </div>
     </Layout>
   );

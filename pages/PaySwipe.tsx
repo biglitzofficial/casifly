@@ -2,15 +2,18 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useERP } from '../context/ERPContext';
 import { useToast } from '../context/ToastContext';
 import { Layout } from '../components/Layout';
-import { AccountType, LedgerEntry, TransactionType, Rates, Customer } from '../types';
+import { AccountType, LedgerEntry, TransactionType, Rates, Customer, Transaction } from '../types';
 import { Card, CardContent, Input, Select, Button } from '../components/ui/Elements';
 import { safeParseFloat, roundCurrency } from '../lib/utils';
 import { ArrowRight, CheckCircle2, Search, Users } from 'lucide-react';
 import { DEFAULT_COMMISSION_RATES, INITIAL_ACCOUNTS } from '../constants';
 import { customerPaySwipeReceivableOutstanding } from '../lib/paySwipeTxnReport';
+import { TypedRecentTransactionsCard } from '../components/TypedRecentTransactionsCard';
+import { TransactionEditModal } from '../components/TransactionEditModal';
+import { TEMP_ALLOW_LEDGER_REPORT_PL_EDIT } from '../lib/tempUiFlags';
 
 export const PaySwipe: React.FC = () => {
-  const { customers, wallets, accounts, transactions, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer } = useERP();
+  const { customers, wallets, accounts, transactions, postTransaction, formatCurrency, getAccountBalance, addCustomer, updateCustomer, updateTransaction } = useERP();
   const toast = useToast();
   const [mode, setMode] = useState<'advance' | 'recovery'>('advance');
 
@@ -37,6 +40,12 @@ export const PaySwipe: React.FC = () => {
   const [appliedMdrPercent, setAppliedMdrPercent] = useState<string>('0');
   const [currentCommRate, setCurrentCommRate] = useState<string>('0');
   const [recoveryPickerQuery, setRecoveryPickerQuery] = useState('');
+  const [editingTxn, setEditingTxn] = useState<Transaction | null>(null);
+
+  const paySwipeTxnList = useMemo(
+    () => transactions.filter((t) => t.type === TransactionType.PAY_SWIPE),
+    [transactions],
+  );
 
   const resetForm = () => {
     setPhone('');
@@ -593,6 +602,33 @@ export const PaySwipe: React.FC = () => {
             </div>
           )}
         </div>
+      </div>
+
+      <div className={`mx-auto w-full px-1 ${mode === 'recovery' ? 'max-w-6xl' : 'max-w-3xl'}`}>
+        <TypedRecentTransactionsCard
+          title="Recent Pay &amp; Swipe transactions"
+          subtitle="Pay advance and swipe recovery entries. Edits update the journal and Profit &amp; Loss when you save (same temporary edit path as Ledger / Reports)."
+          items={paySwipeTxnList}
+          formatCurrency={formatCurrency}
+          customerNameForTxn={(t) =>
+            (t.metadata?.customerId ? customers.find((c) => c.id === t.metadata!.customerId)?.name : undefined)
+          }
+          subtitleForTxn={(t) => {
+            const w = wallets.find((x) => x.id === t.metadata?.walletId);
+            if (w) return `${w.name} wallet`;
+            return (t.description || '').toLowerCase().includes('recovery') ? 'Recovery' : 'Advance / repayment';
+          }}
+          onEditTxn={(t) => setEditingTxn(t)}
+        />
+        {editingTxn && TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? (
+          <TransactionEditModal
+            transaction={editingTxn}
+            accounts={accounts}
+            formatCurrency={formatCurrency}
+            onClose={() => setEditingTxn(null)}
+            onSave={(id, patch) => updateTransaction(id, patch)}
+          />
+        ) : null}
       </div>
     </Layout>
   );
