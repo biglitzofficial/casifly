@@ -22,6 +22,8 @@ export const MasterAdmin: React.FC = () => {
     deleteProductUser,
   } = useAuth();
 
+  const { confirm } = useConfirm();
+
   const MASTER_VIEW_KEY = 'casifly_master_view';
   const masterViews = ['analytics', 'stores', 'wallet'] as const;
   const getInitialMasterView = (): 'analytics' | 'stores' | 'wallet' => {

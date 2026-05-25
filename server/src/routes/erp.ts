@@ -376,6 +376,59 @@ erpRouter.delete('/transactions/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+erpRouter.put('/transactions/:id', async (req, res) => {
+  const user = (req as any).user;
+  const { id } = req.params;
+  const rows = await db.getTransactions(user.productId);
+  const txn = (rows as any[]).find((t: any) => t.id === id);
+  if (!txn) {
+    res.status(404).json({ error: 'Transaction not found' });
+    return;
+  }
+  const { description, date, entries, type, metadata, status } = req.body;
+  const nextDescription = typeof description === 'string' ? description : txn.description;
+  const nextDate = typeof date === 'string' ? date : txn.date;
+  const nextType = typeof type === 'string' ? type : txn.type;
+  const nextStatus = typeof status === 'string' ? status : txn.status || 'COMPLETED';
+  let nextEntriesStr =
+    typeof txn.entries === 'string' ? txn.entries : JSON.stringify((txn as any).entries ?? []);
+  if (Array.isArray(entries)) {
+    const totalDr = entries.reduce((s: number, e: any) => s + (e.debit || 0), 0);
+    const totalCr = entries.reduce((s: number, e: any) => s + (e.credit || 0), 0);
+    if (Math.abs(totalDr - totalCr) > 0.01) {
+      res.status(400).json({ error: 'Transaction must balance' });
+      return;
+    }
+    nextEntriesStr = JSON.stringify(entries);
+  }
+  let nextMetaStr: string | null =
+    typeof txn.metadata === 'string' ? txn.metadata : txn.metadata != null ? JSON.stringify(txn.metadata) : null;
+  if (metadata !== undefined) {
+    nextMetaStr = metadata == null ? null : JSON.stringify(metadata);
+  }
+  const refId = (txn as any).reference_id ?? (txn as any).referenceId ?? null;
+
+  await db.updateTransaction(id, {
+    date: nextDate,
+    description: nextDescription,
+    type: nextType,
+    entries: typeof nextEntriesStr === 'string' ? nextEntriesStr : JSON.stringify(nextEntriesStr),
+    status: nextStatus,
+    metadata: nextMetaStr,
+    reference_id: refId,
+  });
+
+  res.json({
+    id,
+    date: nextDate,
+    description: nextDescription,
+    type: nextType,
+    entries: typeof nextEntriesStr === 'string' ? JSON.parse(nextEntriesStr) : nextEntriesStr,
+    status: nextStatus,
+    metadata: nextMetaStr ? JSON.parse(nextMetaStr) : undefined,
+  });
+});
+
 // Reset all ERP data (development only - any authenticated user)
 erpRouter.post('/reset', async (req, res) => {
   try {

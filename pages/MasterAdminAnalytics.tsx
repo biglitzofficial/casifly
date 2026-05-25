@@ -249,7 +249,8 @@ export const MasterAdminAnalytics: React.FC = () => {
             <p className="text-slate-500 py-8 text-center">No transaction revenue in selected period.</p>
           ) : (
             <div className="space-y-6">
-              {Object.entries(analytics.byStore).map(([storeId, data]) => {
+              {Object.keys(analytics.byStore).map(storeId => {
+                const data = analytics.byStore[storeId];
                 const product = productMap[storeId];
                 return (
                   <div key={storeId} className="border border-slate-200 rounded-2xl p-4 bg-slate-50/50">
@@ -268,7 +269,7 @@ export const MasterAdminAnalytics: React.FC = () => {
                           <div key={wId} className="flex items-center gap-2 p-2 bg-white rounded-xl border">
                             <Wallet className="w-4 h-4 text-slate-400" />
                             <span className="text-sm text-slate-600">{analytics.walletNames[wId] || wId}</span>
-                            <span className="ml-auto font-bold text-slate-800">{formatCurrency(amt)}</span>
+                            <span className="ml-auto font-bold text-slate-800">{formatCurrency(amt as number)}</span>
                           </div>
                         ))}
                       </div>
@@ -291,7 +292,7 @@ export const MasterAdminAnalytics: React.FC = () => {
                         <div key={wId} className="flex items-center gap-2 p-2 bg-white rounded-xl border">
                           <Wallet className="w-4 h-4 text-slate-400" />
                           <span className="text-sm text-slate-600">{analytics.walletNames[wId] || wId}</span>
-                          <span className="ml-auto font-bold text-slate-800">{formatCurrency(amt)}</span>
+                          <span className="ml-auto font-bold text-slate-800">{formatCurrency(amt as number)}</span>
                         </div>
                       ))}
                     </div>

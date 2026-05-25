@@ -747,7 +747,8 @@ const CustomersView = () => {
       ...prev,
       commissionRates: { ...prev.commissionRates, [key]: value }
     }));
-    if (errors[`rate_${key}`]) setErrors(prev => ({ ...prev, [`rate_${key}`]: undefined }));
+    const rateErrKey = `rate_${String(key)}`;
+    if (errors[rateErrKey]) setErrors(prev => ({ ...prev, [rateErrKey]: undefined }));
   };
 
   const filteredCustomers = customers.filter(c =>

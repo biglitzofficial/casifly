@@ -20,6 +20,8 @@ interface ERPContextType {
   // Actions
   postTransaction: (description: string, type: TransactionType, entries: LedgerEntry[], metadata?: TransactionMetadata, date?: string) => void | Promise<void>;
   deleteTransaction: (id: string) => void;
+  /** Replace fields on an existing transaction (balanced entries). Works with API (PUT) or local state. */
+  updateTransaction: (id: string, updates: Partial<Pick<Transaction, 'description' | 'date' | 'entries' | 'type' | 'metadata' | 'status'>>) => Promise<void>;
   reconcileWallet: (walletId: string, actualBalance: number) => void;
   
   // Masters CRUD
@@ -253,6 +255,64 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
     setTransactions(prev => prev.filter(t => t.id !== id));
     toast.success('Transaction deleted');
+  };
+
+  const updateTransaction = async (
+    id: string,
+    patch: Partial<Pick<Transaction, 'description' | 'date' | 'entries' | 'type' | 'metadata' | 'status'>>,
+  ) => {
+    const existing = transactions.find((t) => t.id === id);
+    if (!existing) {
+      toast.error('Transaction not found');
+      throw new Error('Transaction not found');
+    }
+    const next: Transaction = {
+      ...existing,
+      ...patch,
+      entries: patch.entries ?? existing.entries,
+      description: patch.description ?? existing.description,
+      date: patch.date ?? existing.date,
+      type: patch.type ?? existing.type,
+      metadata: patch.metadata !== undefined ? patch.metadata : existing.metadata,
+      status: patch.status ?? existing.status,
+    };
+    const { entries } = next;
+    const totalDebit = entries.reduce((sum, e) => sum + e.debit, 0);
+    const totalCredit = entries.reduce((sum, e) => sum + e.credit, 0);
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      toast.error(`Transaction must balance (Dr ${totalDebit.toFixed(2)} vs Cr ${totalCredit.toFixed(2)})`);
+      throw new Error('Unbalanced');
+    }
+    if (entries.length < 2) {
+      toast.error('At least two ledger lines required');
+      throw new Error('Too few entries');
+    }
+    const invalid = entries.filter((e) => !accounts.some((a) => a.id === e.accountId));
+    if (invalid.length > 0) {
+      toast.error('Unknown account ID on transaction');
+      throw new Error('Invalid account');
+    }
+
+    if (USE_API) {
+      try {
+        await api.updateTransaction(id, {
+          description: next.description,
+          date: next.date,
+          type: next.type,
+          entries: next.entries,
+          metadata: next.metadata,
+          status: next.status ?? 'COMPLETED',
+        });
+        await refreshFromApi();
+        toast.success('Transaction updated');
+      } catch (e: any) {
+        toast.error(e?.message || 'Update failed');
+        throw e;
+      }
+      return;
+    }
+    setTransactions((prev) => prev.map((t) => (t.id === id ? next : t)));
+    toast.success('Transaction updated');
   };
 
   const addCustomer = async (data: CreateCustomerDTO): Promise<string> => {
@@ -699,6 +759,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       transactions: transactionsForUser,
       postTransaction,
       deleteTransaction,
+      updateTransaction,
       getAccountBalance,
       getAccountBalanceAsOf,
       getAccountBalancesAsOf,

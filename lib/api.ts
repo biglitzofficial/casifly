@@ -1,3 +1,5 @@
+import type { PGConfig, Rates, TransactionMetadata } from '../types';
+
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 function getToken(): string | null {
@@ -91,7 +93,7 @@ export const api = {
     return fetchApi<unknown[]>('/erp/customers');
   },
 
-  async addCustomer(body: { name: string; phone: string; commissionRates?: Record<string, number> }) {
+  async addCustomer(body: { name: string; phone: string; commissionRates?: Rates }) {
     return fetchApi<unknown>('/erp/customers', { method: 'POST', body: JSON.stringify(body) });
   },
 
@@ -107,7 +109,7 @@ export const api = {
     return fetchApi<unknown[]>('/erp/wallets');
   },
 
-  async addWallet(body: { name: string; pgName?: string; charges?: Record<string, number>; storeId?: string; openingBalance?: number }) {
+  async addWallet(body: { name: string; pgName?: string; charges?: Rates; storeId?: string; openingBalance?: number }) {
     return fetchApi<unknown>('/erp/wallets', { method: 'POST', body: JSON.stringify(body) });
   },
 
@@ -119,11 +121,11 @@ export const api = {
     return fetchApi<{ ok: boolean }>(`/erp/wallets/${id}`, { method: 'DELETE' });
   },
 
-  async addWalletPG(walletId: string, pgConfig: { name: string; charges: Record<string, number> }) {
+  async addWalletPG(walletId: string, pgConfig: PGConfig) {
     return fetchApi<unknown>(`/erp/wallets/${walletId}/pgs`, { method: 'PATCH', body: JSON.stringify({ action: 'add', pgConfig }) });
   },
 
-  async updateWalletPG(walletId: string, oldPgName: string, pgConfig: { name: string; charges: Record<string, number> }) {
+  async updateWalletPG(walletId: string, oldPgName: string, pgConfig: PGConfig) {
     return fetchApi<unknown>(`/erp/wallets/${walletId}/pgs`, { method: 'PATCH', body: JSON.stringify({ action: 'update', oldPgName, pgConfig }) });
   },
 
@@ -135,12 +137,26 @@ export const api = {
     return fetchApi<unknown[]>('/erp/transactions');
   },
 
-  async postTransaction(body: { description: string; type: string; entries: unknown[]; metadata?: Record<string, unknown>; date?: string }) {
+  async postTransaction(body: { description: string; type: string; entries: unknown[]; metadata?: TransactionMetadata; date?: string }) {
     return fetchApi<unknown>('/erp/transactions', { method: 'POST', body: JSON.stringify(body) });
   },
 
   async deleteTransaction(id: string) {
     return fetchApi<{ ok: boolean }>(`/erp/transactions/${id}`, { method: 'DELETE' });
+  },
+
+  async updateTransaction(
+    id: string,
+    body: {
+      description?: string;
+      date?: string;
+      type?: string;
+      entries?: unknown[];
+      metadata?: TransactionMetadata;
+      status?: string;
+    },
+  ) {
+    return fetchApi<unknown>(`/erp/transactions/${id}`, { method: 'PUT', body: JSON.stringify(body) });
   },
 
   async resetAllData() {

@@ -4,9 +4,11 @@ import { useConfirm } from '../context/ConfirmContext';
 import { Layout } from '../components/Layout';
 import { Transaction, TransactionType } from '../types';
 import { PageFilters, DateRange } from '../components/ui/PageFilters';
-import { X, Info, Download, RotateCcw, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { X, Info, Download, RotateCcw, ChevronLeft, ChevronRight, Trash2, Pencil } from 'lucide-react';
 import { exportToCSV } from '../lib/export';
 import { Button } from '../components/ui/Elements';
+import { TransactionEditModal } from '../components/TransactionEditModal';
+import { TEMP_ALLOW_LEDGER_REPORT_PL_EDIT } from '../lib/tempUiFlags';
 
 const TXN_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'all', label: 'All Types' },
@@ -21,7 +23,7 @@ const ALL_ACCOUNTS = '__all__';
 const PAGE_SIZE = 15;
 
 export const Ledgers: React.FC = () => {
-  const { accounts, wallets, transactions, getAccountBalance, formatCurrency, deleteTransaction } = useERP();
+  const { accounts, wallets, transactions, getAccountBalance, formatCurrency, deleteTransaction, updateTransaction } = useERP();
   const { confirm } = useConfirm();
   const [selectedAccount, setSelectedAccount] = useState(ALL_ACCOUNTS);
   const [viewingTxn, setViewingTxn] = useState<Transaction | null>(null);
@@ -29,6 +31,7 @@ export const Ledgers: React.FC = () => {
   const [dateRange, setDateRange] = useState<DateRange>({ from: '', to: '', preset: 'allTime' });
   const [txnTypeFilter, setTxnTypeFilter] = useState<string>('all');
   const [page, setPage] = useState(1);
+  const [editingTxn, setEditingTxn] = useState<Transaction | null>(null);
 
   const hasActiveFilters = search.trim() !== '' || dateRange.preset !== 'allTime' || (dateRange.from || dateRange.to) || txnTypeFilter !== 'all';
   const resetFilters = () => {
@@ -233,13 +236,16 @@ export const Ledgers: React.FC = () => {
                   )}
                   <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider text-right">Debit</th>
                   <th className="p-4 text-xs font-bold text-slate-600 uppercase tracking-wider text-right">Credit</th>
+                  {TEMP_ALLOW_LEDGER_REPORT_PL_EDIT && (
+                    <th className="p-4 text-xs font-bold text-amber-700 uppercase tracking-wider w-28">Edit</th>
+                  )}
                   <th className="p-4 w-24"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {paginatedTxns.length === 0 ? (
                   <tr>
-                    <td colSpan={showAllAccounts ? 8 : 7} className="p-12 text-center text-slate-500 font-medium">
+                    <td colSpan={showAllAccounts ? (TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? 9 : 8) : (TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? 8 : 7)} className="p-12 text-center text-slate-500 font-medium">
                       No transactions found{showAllAccounts ? '.' : ' for this account.'}
                     </td>
                   </tr>
@@ -257,6 +263,20 @@ export const Ledgers: React.FC = () => {
                           <td className="p-4 text-sm font-medium text-slate-600">{acc?.name || entry.accountId}</td>
                           <td className="p-4 text-sm text-right font-medium text-slate-600">{entry.debit > 0 ? formatCurrency(entry.debit) : '-'}</td>
                           <td className="p-4 text-sm text-right font-medium text-slate-600">{entry.credit > 0 ? formatCurrency(entry.credit) : '-'}</td>
+                          {TEMP_ALLOW_LEDGER_REPORT_PL_EDIT && (
+                            <td className="p-4 text-center">
+                              {eIdx === 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingTxn(txn)}
+                                  className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                  title="Edit transaction (temporary)"
+                                >
+                                  <Pencil size={18} />
+                                </button>
+                              ) : null}
+                            </td>
+                          )}
                           <td className="p-4 text-right">
                             <div className="flex items-center justify-end gap-1">
                               <button 
@@ -298,6 +318,18 @@ export const Ledgers: React.FC = () => {
                         </td>
                         <td className="p-4 text-sm text-right font-medium text-slate-600">{entry.debit > 0 ? formatCurrency(entry.debit) : '-'}</td>
                         <td className="p-4 text-sm text-right font-medium text-slate-600">{entry.credit > 0 ? formatCurrency(entry.credit) : '-'}</td>
+                        {TEMP_ALLOW_LEDGER_REPORT_PL_EDIT && (
+                          <td className="p-4 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setEditingTxn(txn)}
+                              className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                              title="Edit transaction (temporary)"
+                            >
+                              <Pencil size={18} />
+                            </button>
+                          </td>
+                        )}
                         <td className="p-4 text-right">
                           <div className="flex items-center justify-end gap-1">
                             <button 
@@ -337,6 +369,7 @@ export const Ledgers: React.FC = () => {
                     <td className="p-4 text-right font-bold text-slate-800 tabular-nums">
                       {formatCurrency(totalCredit)}
                     </td>
+                    {TEMP_ALLOW_LEDGER_REPORT_PL_EDIT && <td className="p-4" />}
                     <td className="p-4 w-12"></td>
                   </tr>
                 </tfoot>
@@ -370,6 +403,16 @@ export const Ledgers: React.FC = () => {
           )}
         </div>
       </div>
+
+      {editingTxn && TEMP_ALLOW_LEDGER_REPORT_PL_EDIT && (
+        <TransactionEditModal
+          transaction={editingTxn}
+          accounts={accounts}
+          formatCurrency={formatCurrency}
+          onClose={() => setEditingTxn(null)}
+          onSave={(id, patch) => updateTransaction(id, patch)}
+        />
+      )}
 
       {/* Transaction Detail Modal */}
       {viewingTxn && (

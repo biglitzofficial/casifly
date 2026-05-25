@@ -431,7 +431,7 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
   );
 };
 
-const colorMap: Record<string, { bg: string; icon: string; accent: string }> = {
+const colorMap: Record<string, string> = {
   emerald: 'from-emerald-500/20 to-emerald-600/10 border-emerald-200/60',
   indigo: 'from-indigo-500/20 to-indigo-600/10 border-indigo-200/60',
   violet: 'from-violet-500/20 to-violet-600/10 border-violet-200/60',

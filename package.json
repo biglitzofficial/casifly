@@ -7,6 +7,8 @@
     "dev": "vite",
     "dev:full": "npx concurrently \"npm run dev\" \"npm run dev:server\"",
     "dev:server": "npm run dev --prefix server",
+    "dev:mobile": "npm run start --prefix mobile",
+    "dev:mobile:web": "npm run web --prefix mobile",
     "build": "vite build",
     "preview": "vite preview",
     "build:deploy": "npm install --prefix server && npm run build && npx shx mkdir -p server/public && npx shx cp -r dist/* server/public/ && cd server && npm run build",

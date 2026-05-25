@@ -262,6 +262,14 @@ export const firestoreDb = {
     return { ok: true };
   },
 
+  async updateTransaction(
+    id: string,
+    data: { date: string; description: string; type: string; entries: string; status: string; metadata: string | null; reference_id: string | null },
+  ) {
+    await fs().collection(C.transactions).doc(id).update(data);
+    return { ok: true };
+  },
+
   // Staff Targets
   async getStaffTargets(storeId: string, month?: string) {
     let snap = fs().collection('staff_targets').where('store_id', '==', storeId);

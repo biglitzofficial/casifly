@@ -23,7 +23,7 @@ function coercePgRate(v: unknown): number {
 /** Use Masters → Wallets PG card-wise % only (normalized keys visa/master/amex/rupay). */
 function portalPctFromPg(pg: PGConfig | undefined, cardType: string): number {
   if (!pg?.charges) return 0;
-  const c = pg.charges as Record<string, unknown>;
+  const c = pg.charges as unknown as Record<string, unknown>;
   const raw = c[cardType as keyof Rates as string];
   return roundCurrency(coercePgRate(raw));
 }

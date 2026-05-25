@@ -5,7 +5,18 @@ import { Card, CardHeader, CardContent } from '../components/ui/Elements';
 import { PageFilters, DateRange, FilterSection } from '../components/ui/PageFilters';
 import { Transaction, TransactionType } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { TrendingUp, TrendingDown, ReceiptText, User, CreditCard, Wallet as WalletIcon, Scale, FileText, Download } from 'lucide-react';
+import {
+  TrendingUp,
+  TrendingDown,
+  ReceiptText,
+  User,
+  CreditCard,
+  Wallet as WalletIcon,
+  Scale,
+  FileText,
+  Download,
+  Pencil,
+} from 'lucide-react';
 import { exportToCSV } from '../lib/export';
 import { Button } from '../components/ui/Elements';
 import { useAuth } from '../context/AuthContext';
@@ -17,6 +28,9 @@ import {
   deferredSwipePortalExpenseInSubset,
 } from '../lib/swipeTxnEconomics';
 import { buildPaySwipePLRows } from '../lib/paySwipeTxnReport';
+import { TransactionEditModal } from '../components/TransactionEditModal';
+import { TempManualJournalForm } from '../components/TempManualJournalForm';
+import { TEMP_ALLOW_LEDGER_REPORT_PL_EDIT } from '../lib/tempUiFlags';
 
 type ReportTab = 'overview' | 'balance-sheet' | 'pl' | 'transactions' | 'card' | 'wallet' | 'customer';
 type TxnPlMode = 'swipe-inflow' | 'pay-swipe';
@@ -37,7 +51,17 @@ const formatPct = (n: number) => `${n.toFixed(2)}%`;
 
 export const Reports: React.FC = () => {
   const { user } = useAuth();
-  const { transactions, wallets, customers, accounts, formatCurrency, generateProfitAndLoss, getAccountBalancesAsOf } = useERP();
+  const {
+    transactions,
+    wallets,
+    customers,
+    accounts,
+    formatCurrency,
+    generateProfitAndLoss,
+    getAccountBalancesAsOf,
+    updateTransaction,
+    postTransaction,
+  } = useERP();
   const [activeTab, setActiveTab] = useState<ReportTab>('overview');
   const [search, setSearch] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>({ from: '', to: '', preset: 'allTime' });
@@ -46,6 +70,8 @@ export const Reports: React.FC = () => {
   const [txnWalletFilter, setTxnWalletFilter] = useState('all');
   const [txnSortBy, setTxnSortBy] = useState<'date' | 'profit' | 'revenue' | 'cost'>('date');
   const [txnPlMode, setTxnPlMode] = useState<TxnPlMode>('swipe-inflow');
+  /** Temporary: manual edit from Transaction P&amp;L table */
+  const [editingTxn, setEditingTxn] = useState<Transaction | null>(null);
 
   const [bsCompareDayA, setBsCompareDayA] = useState(() => {
     const t = new Date();
@@ -325,7 +351,14 @@ export const Reports: React.FC = () => {
         onCategoryChange={setCardNetworkFilter}
         categoryLabel="Card Network"
       />
-      
+
+      {TEMP_ALLOW_LEDGER_REPORT_PL_EDIT && (
+        <div className="rounded-2xl border border-amber-300/80 bg-amber-50/90 dark:bg-amber-950/40 dark:border-amber-700 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
+          <strong>Temporary data entry:</strong> use Pencil on Ledgers / Transaction P&amp;L rows, or post a manual journal below on Profit &amp; Loss. Set <code className="rounded bg-white/70 dark:bg-black/30 px-1">TEMP_ALLOW_LEDGER_REPORT_PL_EDIT = false</code> in{' '}
+          <code className="rounded bg-white/70 dark:bg-black/30 px-1">lib/tempUiFlags.ts</code> to remove later.
+        </div>
+      )}
+
       <FilterSection title="Report Type">
       <div className="flex gap-2 bg-white/90 backdrop-blur-md p-2 rounded-2xl border-2 border-slate-100 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.06)] overflow-x-auto">
         <TabButton id="overview" label="Performance" icon={TrendingUp} active={activeTab} onClick={setActiveTab} />
@@ -342,6 +375,12 @@ export const Reports: React.FC = () => {
         
         {activeTab === 'pl' && (
           <div className="grid grid-cols-1 gap-6">
+            {TEMP_ALLOW_LEDGER_REPORT_PL_EDIT && (
+              <Card>
+                <CardHeader title="Temporary: manual journal → P&amp;L" subtitle="Balances income/expense accounts directly. Remove when masters-only posting is enforced." />
+                <TempManualJournalForm accounts={accounts} postTransaction={postTransaction} />
+              </Card>
+            )}
             <Card>
               <CardHeader title="Profit & Loss Statement" subtitle="For the current period" action={<Button size="sm" variant="outline" onClick={exportPL}><Download size={14} /> Export CSV</Button>} />
               <div className="p-6 space-y-8">
@@ -571,8 +610,11 @@ export const Reports: React.FC = () => {
             </p>
             {txnPlMode === 'swipe-inflow' ? (
             <DataTable 
-              minTableWidth={1680}
-              headers={['#', 'Date', 'Lead', 'Wallet', 'Card #', 'Card', 'App', 'Actual', 'Gross', 'Shop %', 'Cust %', 'App %', 'App chg', 'Shop chg', 'Cust chg', 'Net amt', 'Gr profit', 'Xfer exp', 'Net profit', 'Comm', 'Remarks']}
+              minTableWidth={TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? 1720 : 1680}
+              headers={[
+                '#', 'Date', 'Lead', 'Wallet', 'Card #', 'Card', 'App', 'Actual', 'Gross', 'Shop %', 'Cust %', 'App %', 'App chg', 'Shop chg', 'Cust chg', 'Net amt', 'Gr profit', 'Xfer exp', 'Net profit', 'Comm', 'Remarks',
+                ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? ['Edit'] : []),
+              ]}
               rows={txnPL.map((t, idx) => [
                 idx + 1,
                 new Date(t.date).toLocaleDateString(),
@@ -595,13 +637,28 @@ export const Reports: React.FC = () => {
                 <span className={`font-bold ${t.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(t.netProfit)}</span>,
                 formatCurrency(t.commission),
                 <span className="max-w-[10rem] truncate block text-xs text-slate-600" title={t.raw.description}>{t.remarks}</span>,
+                ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT
+                  ? [
+                      <button
+                        type="button"
+                        onClick={() => setEditingTxn(t.raw)}
+                        className="p-2 rounded-lg text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/50"
+                        title="Edit underlying transaction (temporary)"
+                      >
+                        <Pencil size={16} />
+                      </button>,
+                    ]
+                  : []),
               ])}
               rightAlignColumns={[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]}
             />
             ) : (
             <DataTable
-              minTableWidth={1520}
-              headers={['#', 'Date', 'Lead', 'Customer', 'Type', 'Wallet', 'Card', 'Principal', 'MDR', 'Net to wlt', 'Charges coll.', 'From / into', 'Net margin', 'Remarks']}
+              minTableWidth={TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? 1560 : 1520}
+              headers={[
+                '#', 'Date', 'Lead', 'Customer', 'Type', 'Wallet', 'Card', 'Principal', 'MDR', 'Net to wlt', 'Charges coll.', 'From / into', 'Net margin', 'Remarks',
+                ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? ['Edit'] : []),
+              ]}
               rows={paySwipeTxnPL.map((t, idx) => [
                 idx + 1,
                 new Date(t.date).toLocaleDateString(),
@@ -617,6 +674,18 @@ export const Reports: React.FC = () => {
                 <span className="whitespace-nowrap text-slate-700">{t.counterpartyAccount}</span>,
                 <span className={`font-bold ${t.netMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(t.netMargin)}</span>,
                 <span className="max-w-[10rem] truncate block text-xs text-slate-600" title={t.raw.description}>{t.remarks}</span>,
+                ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT
+                  ? [
+                      <button
+                        type="button"
+                        onClick={() => setEditingTxn(t.raw)}
+                        className="p-2 rounded-lg text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/50"
+                        title="Edit underlying transaction (temporary)"
+                      >
+                        <Pencil size={16} />
+                      </button>,
+                    ]
+                  : []),
               ])}
               rightAlignColumns={[7, 8, 9, 10, 11, 12]}
             />
@@ -674,6 +743,16 @@ export const Reports: React.FC = () => {
           </Card>
         )}
       </div>
+
+      {editingTxn && TEMP_ALLOW_LEDGER_REPORT_PL_EDIT && (
+        <TransactionEditModal
+          transaction={editingTxn}
+          accounts={accounts}
+          formatCurrency={formatCurrency}
+          onClose={() => setEditingTxn(null)}
+          onSave={(id, patch) => updateTransaction(id, patch)}
+        />
+      )}
     </Layout>
   );
 };

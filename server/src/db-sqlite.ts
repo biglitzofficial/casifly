@@ -207,6 +207,24 @@ export const sqliteDb = {
     return Promise.resolve({ ok: true });
   },
 
+  updateTransaction: (id: string, data: { date: string; description: string; type: string; entries: string; status: string; metadata: string | null; reference_id: string | null }) => {
+    sqlite
+      .prepare(
+        'UPDATE transactions SET date = ?, description = ?, type = ?, entries = ?, status = ?, metadata = ?, reference_id = ? WHERE id = ?',
+      )
+      .run(
+        data.date,
+        data.description,
+        data.type,
+        data.entries,
+        data.status,
+        data.metadata,
+        data.reference_id,
+        id,
+      );
+    return Promise.resolve({ ok: true });
+  },
+
   getStaffTargets: (storeId: string, month?: string) => {
     const rows = month
       ? sqlite.prepare('SELECT * FROM staff_targets WHERE store_id = ? AND month = ?').all(storeId, month)
