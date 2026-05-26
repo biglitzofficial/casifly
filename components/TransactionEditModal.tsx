@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { Account, LedgerEntry, Transaction } from '../types';
 import { Button, Input } from './ui/Elements';
 import { roundCurrency, safeParseFloat } from '../lib/utils';
+import { useToast } from '../context/ToastContext';
 
 type Props = {
   transaction: Transaction;
@@ -23,11 +24,13 @@ export function TransactionEditModal({
   onClose,
   onSave,
 }: Props) {
+  const toast = useToast();
   const [desc, setDesc] = useState(transaction.description);
   const [dateLocal, setDateLocal] = useState(() =>
     toDatetimeLocalValue(transaction.date),
   );
   const [rows, setRows] = useState<LedgerEntry[]>(() => cloneEntries(transaction.entries));
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setDesc(transaction.description);
@@ -35,9 +38,24 @@ export function TransactionEditModal({
     setRows(cloneEntries(transaction.entries));
   }, [transaction]);
 
-  const totalDr = rows.reduce((s, e) => s + e.debit, 0);
-  const totalCr = rows.reduce((s, e) => s + e.credit, 0);
-  const balanced = Math.abs(totalDr - totalCr) < 0.01;
+  /** Same normalization as submit — totals match what will be persisted. */
+  const normalizedDraft = useMemo(
+    () =>
+      rows.map((r) => ({
+        accountId: r.accountId,
+        debit: roundCurrency(safeParseFloat(String(r.debit))),
+        credit: roundCurrency(safeParseFloat(String(r.credit))),
+      })),
+    [rows],
+  );
+
+  const totalDr = normalizedDraft.reduce((s, e) => s + e.debit, 0);
+  const totalCr = normalizedDraft.reduce((s, e) => s + e.credit, 0);
+  const diff = Math.abs(totalDr - totalCr);
+  const balanced = diff < 0.01;
+  /** Which side totals less — user must add gap here (or shrink the heavier side). */
+  const lighterSide =
+    balanced ? null : totalDr > totalCr ? ('credit' as const) : totalDr < totalCr ? ('debit' as const) : null;
 
   const setRow = (idx: number, patch: Partial<LedgerEntry>) => {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -53,16 +71,31 @@ export function TransactionEditModal({
   };
 
   const save = async () => {
-    if (rows.length < 2) return;
-    if (!balanced) return;
-    const invalid = rows.filter((r) => !accounts.some((a) => a.id === r.accountId));
-    if (invalid.length) return;
-    const entries = rows.map((r) => ({
-      accountId: r.accountId,
-      debit: roundCurrency(safeParseFloat(String(r.debit))),
-      credit: roundCurrency(safeParseFloat(String(r.credit))),
-    }));
-    const iso = new Date(dateLocal).toISOString();
+    if (rows.length < 2) {
+      toast.error('Add at least two journal lines.');
+      return;
+    }
+    if (!balanced) {
+      toast.error(
+        lighterSide
+          ? `Totals must match (${formatCurrency(totalDr)} debit vs ${formatCurrency(totalCr)} credit). Gap ${formatCurrency(diff)}: add ${formatCurrency(diff)} to ${lighterSide} lines or reduce the other side.`
+          : `Totals must match (${formatCurrency(totalDr)} debit vs ${formatCurrency(totalCr)} credit).`,
+      );
+      return;
+    }
+    const entries = normalizedDraft;
+    const invalid = entries.filter((r) => !accounts.some((a) => a.id === r.accountId));
+    if (invalid.length > 0) {
+      toast.error('One or more lines use unknown accounts. Pick accounts from the list.');
+      return;
+    }
+    const dParsed = new Date(dateLocal);
+    if (Number.isNaN(dParsed.getTime())) {
+      toast.error('Invalid date or time.');
+      return;
+    }
+    const iso = dParsed.toISOString();
+    setSaving(true);
     try {
       await Promise.resolve(
         onSave(transaction.id, {
@@ -73,7 +106,9 @@ export function TransactionEditModal({
       );
       onClose();
     } catch {
-      /* ERPContext / API already toasts errors */
+      /* ERPContext / API toasts failures */
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -85,7 +120,7 @@ export function TransactionEditModal({
             <h3 className="text-lg font-bold">Edit transaction (temporary)</h3>
             <p className="text-xs text-amber-100/90 mt-1">ID: {transaction.id}</p>
             <p className="text-xs text-slate-300 mt-0.5">
-              Type stays <strong>{transaction.type}</strong> · keep debits = credits
+              Type stays <strong>{transaction.type}</strong>. Save stays off until debit total equals credit total (double-entry).
             </p>
           </div>
           <button
@@ -185,20 +220,48 @@ export function TransactionEditModal({
             <Button type="button" variant="outline" size="sm" onClick={addRow}>
               <Plus size={14} /> Add line
             </Button>
-            <div className={`text-sm font-bold ${balanced ? 'text-emerald-600' : 'text-rose-600'}`}>
-              Dr {formatCurrency(totalDr)} · Cr {formatCurrency(totalCr)}
-              {!balanced && ' · Unbalanced'}
+            <div className={`text-sm font-bold text-right ${balanced ? 'text-emerald-600' : 'text-rose-600'}`}>
+              <div>Debit total {formatCurrency(totalDr)}</div>
+              <div>Credit total {formatCurrency(totalCr)}</div>
+              {!balanced && (
+                <div className="mt-1 text-xs font-bold text-rose-700 dark:text-rose-400 max-w-[20rem]">
+                  Gap {formatCurrency(diff)} — <strong>{lighterSide === 'credit' ? 'Credit' : lighterSide === 'debit' ? 'Debit' : 'One'}</strong> side needs that amount extra (or reduce the other side).
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        <div className="p-6 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-100 dark:border-slate-700 flex justify-end gap-3 shrink-0">
-          <Button type="button" variant="outline" onClick={onClose}>
+        <div className="p-6 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-100 dark:border-slate-700 flex flex-col gap-3 shrink-0">
+          {!balanced ? (
+            <p className="text-xs font-semibold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2">
+              <strong>Save is disabled:</strong> this entry is off by {formatCurrency(diff)}. Every rupee debited must be credited elsewhere (often a small typo on PEHABIT vs customer line or portal fee lines).
+            </p>
+          ) : rows.length < 2 ? (
+            <p className="text-xs font-semibold text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">
+              Need at least two lines for double-entry before you can save.
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button type="button" disabled={!balanced || rows.length < 2} onClick={() => void save()}>
+          <Button
+            type="button"
+            disabled={saving || !balanced || rows.length < 2}
+            loading={saving}
+            title={
+              rows.length < 2
+                ? 'Add another journal line first'
+                : !balanced
+                  ? `Totals must match (gap ${formatCurrency(diff)})`
+                  : 'Save changes'
+            }
+            onClick={() => void save()}
+          >
             Save changes
           </Button>
+          </div>
         </div>
       </div>
     </div>
