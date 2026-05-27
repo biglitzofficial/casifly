@@ -5,7 +5,7 @@ import {
   BalanceSheet, ProfitAndLoss,
 } from '../types';
 import { INITIAL_ACCOUNTS, INITIAL_CUSTOMERS, INITIAL_WALLETS } from '../constants';
-import { formatCurrency, generateId, roundCurrency, txnOnOrBeforeLocalDay } from '../lib/utils';
+import { formatCurrency, generateId, roundCurrency, txnOnOrBeforeLocalDay, normalizeLedgerEntries } from '../lib/utils';
 import { deferredSwipePortalExpenseExcludedFromPl } from '../lib/swipeTxnEconomics';
 import { useToast } from './ToastContext';
 import { useAuth } from './AuthContext';
@@ -86,7 +86,14 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [accounts, setAccounts] = useState<Account[]>(stored?.accounts || INITIAL_ACCOUNTS);
   const [customers, setCustomers] = useState<Customer[]>(stored?.customers || INITIAL_CUSTOMERS);
   const [allWallets, setWallets] = useState<Wallet[]>(stored?.wallets || INITIAL_WALLETS);
-  const [transactions, setTransactions] = useState<Transaction[]>(stored?.transactions || []);
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    const s = loadERPFromStorage();
+    const tx = s?.transactions ?? [];
+    return tx.map((t: Transaction) => ({
+      ...t,
+      entries: normalizeLedgerEntries(t.entries),
+    }));
+  });
 
   const refreshFromApi = useCallback(async () => {
     if (!USE_API || !api.getToken()) return;
@@ -97,14 +104,28 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         api.getWallets(),
         api.getTransactions(),
       ]);
-      const mapped = (accs as any[]).map(a => ({ id: a.id, name: a.name, type: a.type, category: a.category, balance: a.balance ?? 0 }));
-      const ids = new Set(mapped.map((a) => a.id));
+      const mappedBase = (accs as any[]).map(a => ({ id: a.id, name: a.name, type: a.type, category: a.category, balance: a.balance ?? 0 }));
+      const ids = new Set(mappedBase.map((a) => a.id));
+      const mapped: typeof mappedBase = [...mappedBase];
+      for (const c of custs as any[]) {
+        const lid = c.ledgerAccountId as string | undefined;
+        if (lid && !ids.has(lid)) {
+          mapped.push({
+            id: lid,
+            name: `${c.name} Paid To`,
+            type: AccountType.LIABILITY,
+            category: 'Customer',
+            balance: 0,
+          });
+          ids.add(lid);
+        }
+      }
       const missingCoa = INITIAL_ACCOUNTS.filter((a) => !ids.has(a.id));
       /** Seed banks (A002/A003) may be store-scoped in DB while UI merges full COA — without this, Pay & Swipe posts to bank IDs fail validation and never hit the ledger. */
       setAccounts(missingCoa.length ? [...mapped, ...missingCoa] : mapped);
       setCustomers((custs as any[]).map(c => ({ id: c.id, name: c.name, phone: c.phone, commissionRates: c.commissionRates, ledgerAccountId: c.ledgerAccountId, joinedAt: c.joinedAt, storeId: c.storeId })));
       setWallets((wals as any[]).map(w => ({ id: w.id, name: w.name, ledgerAccountId: w.ledgerAccountId, pgs: w.pgs, storeId: w.storeId })));
-      setTransactions((txns as any[]).map(t => ({ id: t.id, date: t.date, description: t.description, type: t.type, entries: t.entries, status: t.status ?? 'COMPLETED', metadata: t.metadata, referenceId: t.referenceId })));
+      setTransactions((txns as any[]).map(t => ({ id: t.id, date: t.date, description: t.description, type: t.type, entries: normalizeLedgerEntries(t.entries), status: t.status ?? 'COMPLETED', metadata: t.metadata, referenceId: t.referenceId })));
     } catch (e) {
       console.error('ERP fetch failed', e);
     }
@@ -201,17 +222,18 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // --- Actions ---
 
   const postTransaction = (description: string, type: TransactionType, entries: LedgerEntry[], metadata?: TransactionMetadata, dateStr?: string) => {
-    const totalDebit = entries.reduce((sum, e) => sum + e.debit, 0);
-    const totalCredit = entries.reduce((sum, e) => sum + e.credit, 0);
+    const lines = normalizeLedgerEntries(entries);
+    const totalDebit = lines.reduce((sum, e) => sum + e.debit, 0);
+    const totalCredit = lines.reduce((sum, e) => sum + e.credit, 0);
     if (Math.abs(totalDebit - totalCredit) > 0.01) {
       toast.error(`Transaction Unbalanced! Dr: ${totalDebit.toFixed(2)}, Cr: ${totalCredit.toFixed(2)}`);
       return;
     }
-    if (entries.length < 2) {
+    if (lines.length < 2) {
       toast.error("A transaction must have at least two entries (Debit and Credit).");
       return;
     }
-    const invalidAccounts = entries.filter(e => !accounts.some(a => a.id === e.accountId));
+    const invalidAccounts = lines.filter(e => !accounts.some(a => a.id === e.accountId));
     if (invalidAccounts.length > 0) {
       toast.error(`Invalid Account IDs: ${invalidAccounts.map(e => e.accountId).join(', ')}`);
       return;
@@ -223,7 +245,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     };
 
     if (USE_API) {
-      return api.postTransaction({ description, type, entries, metadata: metadataWithStore, date: dateStr })
+      return api.postTransaction({ description, type, entries: lines, metadata: metadataWithStore, date: dateStr })
         .then(async () => {
           await refreshFromApi();
         })
@@ -235,7 +257,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       date: dateStr || new Date().toISOString(),
       description,
       type,
-      entries,
+      entries: lines,
       status: 'COMPLETED',
       metadata: metadataWithStore
     };
@@ -269,7 +291,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const next: Transaction = {
       ...existing,
       ...patch,
-      entries: patch.entries ?? existing.entries,
+      entries: normalizeLedgerEntries(patch.entries !== undefined ? patch.entries : existing.entries),
       description: patch.description ?? existing.description,
       date: patch.date ?? existing.date,
       type: patch.type ?? existing.type,
@@ -740,7 +762,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (Array.isArray(data.erp.accounts)) setAccounts(data.erp.accounts);
         if (Array.isArray(data.erp.customers)) setCustomers(data.erp.customers);
         if (Array.isArray(data.erp.wallets)) setWallets(data.erp.wallets);
-        if (Array.isArray(data.erp.transactions)) setTransactions(data.erp.transactions);
+        if (Array.isArray(data.erp.transactions)) setTransactions(data.erp.transactions.map((t: Transaction) => ({ ...t, entries: normalizeLedgerEntries(t.entries) })));
       }
       if (data.admin && typeof data.admin === 'object') {
         localStorage.setItem('casifly_admin_data', JSON.stringify(data.admin));

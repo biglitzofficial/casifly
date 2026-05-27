@@ -1,5 +1,6 @@
 import { ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import type { LedgerEntry } from "../types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -41,6 +42,19 @@ export const safeParseFloat = (value: string | number): number => {
 export const roundCurrency = (value: number): number => {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 };
+
+/**
+ * Coerce stored/API ledger lines to numeric debits/credits and `accountId`.
+ * String amounts from JSON break `reduce((s,e) => s + e.debit, 0)` (string concatenation).
+ */
+export function normalizeLedgerEntries(raw: unknown): LedgerEntry[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((e: { accountId?: string; account_id?: string; debit?: unknown; credit?: unknown }) => ({
+    accountId: String(e?.accountId ?? e?.account_id ?? '').trim(),
+    debit: roundCurrency(safeParseFloat(e?.debit as string | number)),
+    credit: roundCurrency(safeParseFloat(e?.credit as string | number)),
+  }));
+}
 
 /** Local calendar date YYYY-MM-DD for an ISO or parseable date string (browser local TZ). */
 export function transactionLocalYmd(isoOrDate: string): string | null {

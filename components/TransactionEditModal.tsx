@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { Account, LedgerEntry, Transaction } from '../types';
 import { Button, Input } from './ui/Elements';
-import { roundCurrency, safeParseFloat } from '../lib/utils';
+import { roundCurrency, safeParseFloat, normalizeLedgerEntries } from '../lib/utils';
 import { useToast } from '../context/ToastContext';
 
 type Props = {
@@ -275,9 +275,5 @@ function toDatetimeLocalValue(iso: string): string {
 }
 
 function cloneEntries(entries: LedgerEntry[]): LedgerEntry[] {
-  return entries.map((e) => ({
-    accountId: e.accountId,
-    debit: roundCurrency(e.debit),
-    credit: roundCurrency(e.credit),
-  }));
+  return normalizeLedgerEntries(entries);
 }
