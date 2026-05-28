@@ -70,6 +70,81 @@ export function TransactionEditModal({
     setRows((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const accountLabel = (accountId: string) =>
+    accounts.find((a) => a.id === accountId)?.name ?? accountId;
+
+  /** Swipe payout outflow often needs L003 (Dr) + I001 (Cr) as a pair — easy to miss below the fold. */
+  const swipeOutflowHint = useMemo(() => {
+    if (transaction.type !== 'SWIPE_PAY' || !/payout outflow/i.test(transaction.description)) return null;
+    const l003 = rows.find((r) => r.accountId === 'L003' && safeParseFloat(String(r.debit)) > 0);
+    const i001 = rows.find((r) => r.accountId === 'I001' && safeParseFloat(String(r.credit)) > 0);
+    if (l003 && !i001) {
+      return `This payout has margin on L003 (${formatCurrency(safeParseFloat(String(l003.debit)))}) but no matching Service Charges (I001) credit line — scroll down or tap “Add I001 credit line”.`;
+    }
+    return null;
+  }, [transaction.type, transaction.description, rows, formatCurrency]);
+
+  const addMissingMarginCreditLine = () => {
+    const l003 = rows.find((r) => r.accountId === 'L003');
+    const amt = l003 ? roundCurrency(safeParseFloat(String(l003.debit))) : 0;
+    if (amt <= 0) {
+      toast.error('No L003 debit line to pair with I001.');
+      return;
+    }
+    if (rows.some((r) => r.accountId === 'I001' && safeParseFloat(String(r.credit)) > 0)) {
+      toast.error('I001 credit line already exists.');
+      return;
+    }
+    setRows((prev) => [...prev, { accountId: 'I001', debit: 0, credit: amt }]);
+    toast.success(`Added Service Charges (I001) credit ${formatCurrency(amt)}.`);
+  };
+
+  /** Trim the largest credit (or debit) line by the current gap — typical fix for wallet vs fee typos. */
+  const applyQuickBalanceFix = () => {
+    if (balanced || diff < 0.01) return;
+    let label = '';
+    setRows((prev) => {
+      const next = prev.map((r) => ({ ...r }));
+      if (totalCr > totalDr) {
+        let idx = 0;
+        for (let i = 1; i < next.length; i++) {
+          if (safeParseFloat(String(next[i].credit)) > safeParseFloat(String(next[idx].credit))) idx = i;
+        }
+        label = accountLabel(next[idx].accountId);
+        const cur = roundCurrency(safeParseFloat(String(next[idx].credit)));
+        next[idx] = { ...next[idx], credit: Math.max(0, roundCurrency(cur - diff)), debit: 0 };
+      } else {
+        let idx = 0;
+        for (let i = 1; i < next.length; i++) {
+          if (safeParseFloat(String(next[i].debit)) > safeParseFloat(String(next[idx].debit))) idx = i;
+        }
+        label = accountLabel(next[idx].accountId);
+        const cur = roundCurrency(safeParseFloat(String(next[idx].debit)));
+        next[idx] = { ...next[idx], debit: Math.max(0, roundCurrency(cur - diff)), credit: 0 };
+      }
+      return next;
+    });
+    toast.success(`Adjusted ${label} by ${formatCurrency(diff)} — review lines, then save.`);
+  };
+
+  const quickFixLabel = useMemo(() => {
+    if (balanced) return null;
+    if (totalCr > totalDr) {
+      let idx = 0;
+      for (let i = 1; i < rows.length; i++) {
+        if (safeParseFloat(String(rows[i].credit)) > safeParseFloat(String(rows[idx].credit))) idx = i;
+      }
+      const name = accountLabel(rows[idx]?.accountId ?? '');
+      return `Reduce ${name} credit by ${formatCurrency(diff)}`;
+    }
+    let idx = 0;
+    for (let i = 1; i < rows.length; i++) {
+      if (safeParseFloat(String(rows[i].debit)) > safeParseFloat(String(rows[idx].debit))) idx = i;
+    }
+    const name = accountLabel(rows[idx]?.accountId ?? '');
+    return `Reduce ${name} debit by ${formatCurrency(diff)}`;
+  }, [balanced, totalCr, totalDr, diff, rows, accounts]);
+
   const save = async () => {
     if (rows.length < 2) {
       toast.error('Add at least two journal lines.');
@@ -148,6 +223,11 @@ export function TransactionEditModal({
           </div>
 
           <div className="rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden">
+            {rows.length > 4 ? (
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 px-3 py-2 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-600">
+                {rows.length} journal lines — scroll the table to see all (payout outflows often have 5 lines including Service Charges).
+              </p>
+            ) : null}
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-600">
                 <tr>
@@ -216,6 +296,12 @@ export function TransactionEditModal({
             </table>
           </div>
 
+          {swipeOutflowHint ? (
+            <p className="text-xs font-semibold text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">
+              {swipeOutflowHint}
+            </p>
+          ) : null}
+
           <div className="flex flex-wrap items-center justify-between gap-3">
             <Button type="button" variant="outline" size="sm" onClick={addRow}>
               <Plus size={14} /> Add line
@@ -234,9 +320,26 @@ export function TransactionEditModal({
 
         <div className="p-6 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-100 dark:border-slate-700 flex flex-col gap-3 shrink-0">
           {!balanced ? (
-            <p className="text-xs font-semibold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2">
-              <strong>Save is disabled:</strong> this entry is off by {formatCurrency(diff)}. Every rupee debited must be credited elsewhere (often a small typo on PEHABIT vs customer line or portal fee lines).
-            </p>
+            <>
+              <p className="text-xs font-semibold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-2">
+                <strong>Save is disabled:</strong> debits {formatCurrency(totalDr)} vs credits {formatCurrency(totalCr)} — gap {formatCurrency(diff)}.
+                {totalCr > totalDr && rows.some((r) => r.accountId === 'E001')
+                  ? ' If you raised Wallet MDR (E001), lower the wallet credit (PEHABIT) by the same amount, or undo the MDR change.'
+                  : ' Every rupee debited must equal credits elsewhere.'}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {quickFixLabel ? (
+                  <Button type="button" variant="outline" size="sm" onClick={applyQuickBalanceFix}>
+                    Quick fix: {quickFixLabel}
+                  </Button>
+                ) : null}
+                {swipeOutflowHint ? (
+                  <Button type="button" variant="outline" size="sm" onClick={addMissingMarginCreditLine}>
+                    Add I001 credit line
+                  </Button>
+                ) : null}
+              </div>
+            </>
           ) : rows.length < 2 ? (
             <p className="text-xs font-semibold text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">
               Need at least two lines for double-entry before you can save.
