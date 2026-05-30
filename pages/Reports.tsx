@@ -18,6 +18,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import { exportToCSV } from '../lib/export';
+import { roundCurrency } from '../lib/utils';
 import { Button } from '../components/ui/Elements';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -47,7 +48,17 @@ const CARD_NETWORK_OPTIONS = [
   { value: 'rupay', label: 'Rupay' },
 ];
 
-const formatPct = (n: number) => `${n.toFixed(2)}%`;
+/** Workbook-style rate column (no % suffix), e.g. 1.6, 3.3 */
+const formatWorkbookPct = (n: number) => (Number.isFinite(n) ? n : 0).toFixed(1);
+
+function formatSwipeCardLabel(cardRaw: string): string {
+  const u = cardRaw.toUpperCase();
+  if (u === 'VISA') return 'Visa';
+  if (u === 'MASTER' || u === 'MASTERCARD') return 'Master';
+  if (u === 'AMEX') return 'Amex';
+  if (u === 'RUPAY') return 'Rupay';
+  return cardRaw.charAt(0).toUpperCase() + cardRaw.slice(1).toLowerCase();
+}
 
 export const Reports: React.FC = () => {
   const { user } = useAuth();
@@ -177,15 +188,18 @@ export const Reports: React.FC = () => {
         const customer = customers.find(c => c.id === t.metadata?.customerId);
         const wallet = wallets.find(w => w.id === t.metadata?.walletId);
         const cardRaw = (t.metadata?.cardType || 'visa').toUpperCase();
-        const cardLabel = cardRaw === 'MASTERCARD' ? 'MASTER' : cardRaw;
+        const cardLabel = formatSwipeCardLabel(cardRaw === 'MASTERCARD' ? 'MASTER' : cardRaw);
         const appPctDisplay = inferPgName(wallet, t.metadata?.cardType, econ.appPct);
+        const pgName = t.metadata?.pgName?.trim() || appPctDisplay;
         const performer = t.metadata?.performedByUserId;
         const lead =
           performer && user?.id === performer ? user?.name ?? '—'
           : performer ? performer.slice(0, 8) + '…'
           : '—';
         const transferExpense = transferByInflow.get(t.id) ?? 0;
-        const netProfit = econ.grossProfit - transferExpense;
+        const ourCharge = roundCurrency(econ.shopCharges - transferExpense);
+        const ourPct = econ.actualAmount > 0 ? (ourCharge / econ.actualAmount) * 100 : 0;
+        const netProfit = roundCurrency(ourCharge - econ.appCharges);
         return {
           id: t.id,
           raw: t,
@@ -195,6 +209,7 @@ export const Reports: React.FC = () => {
           walletId: t.metadata?.walletId,
           walletName: wallet?.name ?? '—',
           card: cardLabel,
+          pgName,
           appName: appPctDisplay,
           lead,
           actualAmount: econ.actualAmount,
@@ -205,12 +220,12 @@ export const Reports: React.FC = () => {
           appCharges: econ.appCharges,
           shopCharges: econ.shopCharges,
           customerCharges: econ.shopCharges,
+          ourCharge,
+          ourPct,
           netAmount: econ.netAmount,
           grossProfit: econ.grossProfit,
           transferExpense,
           netProfit,
-          commission: 0,
-          remarks: t.description.length > 48 ? `${t.description.slice(0, 48)}…` : t.description,
         };
       });
     if (txnCustomerFilter !== 'all') {
@@ -304,34 +319,24 @@ export const Reports: React.FC = () => {
       return;
     }
     const headers = [
-      '#', 'Date', 'Lead', 'Wallet', 'Card #', 'Card type', 'App (portal)',
-      'Actual amount', 'Gross amount', 'Shop %', 'Customer %', 'App %',
-      'App charges', 'Shop charges', 'Customer charges', 'Net amount',
-      'Gross profit', 'Transfer expense', 'Net profit', 'Customer (ref)', 'Commission', 'Remarks',
+      '#', 'Date', 'Wallet', 'Card', 'PG', 'Amount', 'App %', 'App amount', 'Customer %', 'Charge',
+      'Our %', 'Our charge', 'Profit', 'Other value',
     ];
     const rows = txnPL.map((r, i) => [
       String(i + 1),
       new Date(r.date).toLocaleDateString(),
-      r.lead,
       r.walletName,
-      '—',
       r.card,
-      r.appName,
+      r.pgName,
       formatCurrency(r.actualAmount),
+      formatWorkbookPct(r.appPct),
       formatCurrency(r.grossAmount),
-      formatPct(r.shopPct),
-      formatPct(r.customerPct),
-      formatPct(r.appPct),
-      formatCurrency(r.appCharges),
+      formatWorkbookPct(r.customerPct),
       formatCurrency(r.shopCharges),
-      formatCurrency(r.customerCharges),
-      formatCurrency(r.netAmount),
-      formatCurrency(r.grossProfit),
-      formatCurrency(r.transferExpense),
+      formatWorkbookPct(r.ourPct),
+      formatCurrency(r.ourCharge),
       formatCurrency(r.netProfit),
-      r.customer,
-      formatCurrency(r.commission),
-      r.remarks,
+      formatCurrency(r.transferExpense),
     ]);
     exportToCSV('transaction-pl-swipe-inflow', headers, rows);
   };
@@ -592,7 +597,7 @@ export const Reports: React.FC = () => {
               title={txnPlMode === 'swipe-inflow' ? 'Transaction P&L (Swipe Inflow)' : 'Transaction P&L (Pay & Swipe)'}
               subtitle={
                 txnPlMode === 'swipe-inflow'
-                  ? 'Workbook-style math: gross = actual − app charges; gross profit = shop − app charges; net profit = gross profit − transfer expense. Payout (same customer & calendar day) is split evenly across inflows in the filtered range.'
+                  ? 'Workbook columns: Amount − app % → app amount; Charge = customer fee; Our charge = charge − other value (payout transfer); Profit = our charge − portal fee. Other value = same-day transfer expense split across linked inflows.'
                   : 'Advance = customer receivable (A006) funded from bank/cash/wallet. Recovery = swipe clears receivable, MDR to E001, net to wallet, charges collected to I001. Net margin = charges collected − MDR (recovery rows).'
               }
               action={<Button size="sm" variant="outline" onClick={exportTxnPL}><Download size={14} /> Export CSV</Button>}
@@ -610,33 +615,27 @@ export const Reports: React.FC = () => {
             </p>
             {txnPlMode === 'swipe-inflow' ? (
             <DataTable 
-              minTableWidth={TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? 1720 : 1680}
+              minTableWidth={TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? 1320 : 1280}
               headers={[
-                '#', 'Date', 'Lead', 'Wallet', 'Card #', 'Card', 'App', 'Actual', 'Gross', 'Shop %', 'Cust %', 'App %', 'App chg', 'Shop chg', 'Cust chg', 'Net amt', 'Gr profit', 'Xfer exp', 'Net profit', 'Comm', 'Remarks',
+                '#', 'Date', 'Wallet', 'Card', 'PG', 'Amount', 'App %', 'App amount', 'Customer %', 'Charge',
+                'Our %', 'Our charge', 'Profit', 'Other value',
                 ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? ['Edit'] : []),
               ]}
               rows={txnPL.map((t, idx) => [
                 idx + 1,
                 new Date(t.date).toLocaleDateString(),
-                t.lead,
                 <span className="font-medium text-slate-800 whitespace-nowrap">{t.walletName}</span>,
-                '—',
                 t.card,
-                <span className="whitespace-nowrap">{t.appName}</span>,
+                <span className="whitespace-nowrap">{t.pgName}</span>,
                 formatCurrency(t.actualAmount),
+                formatWorkbookPct(t.appPct),
                 formatCurrency(t.grossAmount),
-                formatPct(t.shopPct),
-                formatPct(t.customerPct),
-                formatPct(t.appPct),
-                formatCurrency(t.appCharges),
+                formatWorkbookPct(t.customerPct),
                 formatCurrency(t.shopCharges),
-                formatCurrency(t.customerCharges),
-                formatCurrency(t.netAmount),
-                formatCurrency(t.grossProfit),
-                formatCurrency(t.transferExpense),
+                formatWorkbookPct(t.ourPct),
+                formatCurrency(t.ourCharge),
                 <span className={`font-bold ${t.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(t.netProfit)}</span>,
-                formatCurrency(t.commission),
-                <span className="max-w-[10rem] truncate block text-xs text-slate-600" title={t.raw.description}>{t.remarks}</span>,
+                formatCurrency(t.transferExpense),
                 ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT
                   ? [
                       <button
@@ -650,7 +649,7 @@ export const Reports: React.FC = () => {
                     ]
                   : []),
               ])}
-              rightAlignColumns={[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]}
+              rightAlignColumns={[5, 6, 7, 8, 9, 10, 11, 12, 13]}
             />
             ) : (
             <DataTable

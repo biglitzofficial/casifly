@@ -519,8 +519,8 @@ export const SwipePay: React.FC = () => {
                         <Input label="Swipe Amount (₹)" type="number" className="text-xl font-bold" value={swipeAmount} onChange={e => { setSwipeAmount(e.target.value); setStep1Errors(p => ({...p, swipeAmount: ''})); }} error={step1Errors.swipeAmount} placeholder="0" />
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <Input label="Customer shop charge %" type="number" step="0.1" value={currentServiceRate} onChange={e => { setCurrentServiceRate(e.target.value); setStep1Errors(p => ({...p, currentServiceRate: ''})); }} error={step1Errors.currentServiceRate} title="Commission to customer for this card — not the PG MDR" />
-                        <Input label={`Wallet PG MDR % (${selectedPG?.name ?? 'PG'})`} type="number" step="0.01" value={String(resolvedPortalPct)} readOnly className="bg-slate-50 dark:bg-slate-800/60 cursor-not-allowed" title="From Masters → Wallets for this payment gateway and card type. Edit there to change." />
+                        <Input label="Customer charge %" type="number" step="0.1" value={currentServiceRate} onChange={e => { setCurrentServiceRate(e.target.value); setStep1Errors(p => ({...p, currentServiceRate: ''})); }} error={step1Errors.currentServiceRate} title="Commission charged to the customer for this card" />
+                        <Input label="Our charge %" type="number" step="0.01" value={String(resolvedPortalPct)} readOnly className="bg-slate-50 dark:bg-slate-800/60 cursor-not-allowed" title={`From Masters → Wallets (${selectedPG?.name ?? 'PG'}) for this card type. Edit there to change.`} />
                       </div>
                       <Button type="submit" size="lg" className="w-full h-14 text-lg" loading={inflowLoading}>Process Inflow <ArrowRight size={20}/></Button>
                     </form>
@@ -697,11 +697,11 @@ export const SwipePay: React.FC = () => {
                      <span className="text-2xl font-black text-white tabular-nums">{formatCurrency(amountVal)}</span>
                    </div>
                    <div className="flex justify-between items-center">
-                     <span className="text-base font-semibold text-rose-300">Portal Fee ({resolvedPortalPct}%)</span>
+                     <span className="text-base font-semibold text-rose-300">Our charge ({resolvedPortalPct}%)</span>
                      <span className="text-lg font-bold text-white tabular-nums">-{formatCurrency(portalFeeAmount)}</span>
                    </div>
                    <div className="flex justify-between items-center pb-5 border-b-2 border-slate-600">
-                     <span className="text-base font-semibold text-indigo-300">Our Service Fee ({serviceRateVal}%)</span>
+                     <span className="text-base font-semibold text-indigo-300">Customer charge ({serviceRateVal}%)</span>
                      <span className="text-lg font-bold text-white tabular-nums">-{formatCurrency(serviceFeeAmount)}</span>
                    </div>
                    <div className="pt-5">
