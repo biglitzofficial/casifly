@@ -18,14 +18,13 @@ import {
   Pencil,
 } from 'lucide-react';
 import { exportToCSV } from '../lib/export';
-import { roundCurrency } from '../lib/utils';
 import { Button } from '../components/ui/Elements';
 import { useAuth } from '../context/AuthContext';
 import {
   isSwipePayInflow,
   parseSwipeInflowEconomics,
   inferPgName,
-  buildTransferExpensePerInflowId,
+  computeSwipeInflowFranchisePL,
   deferredSwipePortalExpenseInSubset,
 } from '../lib/swipeTxnEconomics';
 import { buildPaySwipePLRows } from '../lib/paySwipeTxnReport';
@@ -180,11 +179,11 @@ export const Reports: React.FC = () => {
   }).sort((a, b) => b.profit - a.profit).slice(0, 10);
 
   const txnPL = useMemo(() => {
-    const transferByInflow = buildTransferExpensePerInflowId(filteredTransactions);
     let data = filteredTransactions
       .filter(t => isSwipePayInflow(t))
       .map(t => {
         const econ = parseSwipeInflowEconomics(t, filteredTransactions)!;
+        const franchise = computeSwipeInflowFranchisePL(t, econ);
         const customer = customers.find(c => c.id === t.metadata?.customerId);
         const wallet = wallets.find(w => w.id === t.metadata?.walletId);
         const cardRaw = (t.metadata?.cardType || 'visa').toUpperCase();
@@ -196,10 +195,6 @@ export const Reports: React.FC = () => {
           performer && user?.id === performer ? user?.name ?? '—'
           : performer ? performer.slice(0, 8) + '…'
           : '—';
-        const transferExpense = transferByInflow.get(t.id) ?? 0;
-        const ourCharge = roundCurrency(econ.shopCharges - transferExpense);
-        const ourPct = econ.actualAmount > 0 ? (ourCharge / econ.actualAmount) * 100 : 0;
-        const netProfit = roundCurrency(ourCharge - econ.appCharges);
         return {
           id: t.id,
           raw: t,
@@ -213,19 +208,14 @@ export const Reports: React.FC = () => {
           appName: appPctDisplay,
           lead,
           actualAmount: econ.actualAmount,
-          grossAmount: econ.grossAmount,
-          shopPct: econ.shopPct,
-          customerPct: econ.customerPct,
           appPct: econ.appPct,
           appCharges: econ.appCharges,
-          shopCharges: econ.shopCharges,
-          customerCharges: econ.shopCharges,
-          ourCharge,
-          ourPct,
-          netAmount: econ.netAmount,
-          grossProfit: econ.grossProfit,
-          transferExpense,
-          netProfit,
+          customerPct: franchise.customerChargePct,
+          customerAmount: franchise.customerAmount,
+          ourPct: franchise.ourChargePct,
+          ourCharge: franchise.ourChargeAmount,
+          otherValue: franchise.otherValue,
+          netProfit: franchise.netProfit,
         };
       });
     if (txnCustomerFilter !== 'all') {
@@ -319,8 +309,8 @@ export const Reports: React.FC = () => {
       return;
     }
     const headers = [
-      '#', 'Date', 'Wallet', 'Card', 'PG', 'Amount', 'App %', 'App amount', 'Customer %', 'Charge',
-      'Our %', 'Our charge', 'Profit', 'Other value',
+      '#', 'Date', 'Wallet', 'Card', 'PG', 'Amount', 'App %', 'App charge amount', 'Customer %', 'Customer amount',
+      'Our %', 'Our charges', 'Other value', 'Net profit',
     ];
     const rows = txnPL.map((r, i) => [
       String(i + 1),
@@ -330,13 +320,13 @@ export const Reports: React.FC = () => {
       r.pgName,
       formatCurrency(r.actualAmount),
       formatWorkbookPct(r.appPct),
-      formatCurrency(r.grossAmount),
+      formatCurrency(r.appCharges),
       formatWorkbookPct(r.customerPct),
-      formatCurrency(r.shopCharges),
+      formatCurrency(r.customerAmount),
       formatWorkbookPct(r.ourPct),
       formatCurrency(r.ourCharge),
+      formatCurrency(r.otherValue),
       formatCurrency(r.netProfit),
-      formatCurrency(r.transferExpense),
     ]);
     exportToCSV('transaction-pl-swipe-inflow', headers, rows);
   };
@@ -597,7 +587,7 @@ export const Reports: React.FC = () => {
               title={txnPlMode === 'swipe-inflow' ? 'Transaction P&L (Swipe Inflow)' : 'Transaction P&L (Pay & Swipe)'}
               subtitle={
                 txnPlMode === 'swipe-inflow'
-                  ? 'Workbook columns: Amount − app % → app amount; Charge = customer fee; Our charge = charge − other value (payout transfer); Profit = our charge − portal fee. Other value = same-day transfer expense split across linked inflows.'
+                  ? 'Customer amount = swipe × customer %; Our charges = swipe × our %; Other value = customer amount − our charges (franchise gap); Net profit = our charges − app (portal) charge.'
                   : 'Advance = customer receivable (A006) funded from bank/cash/wallet. Recovery = swipe clears receivable, MDR to E001, net to wallet, charges collected to I001. Net margin = charges collected − MDR (recovery rows).'
               }
               action={<Button size="sm" variant="outline" onClick={exportTxnPL}><Download size={14} /> Export CSV</Button>}
@@ -617,8 +607,8 @@ export const Reports: React.FC = () => {
             <DataTable 
               minTableWidth={TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? 1320 : 1280}
               headers={[
-                '#', 'Date', 'Wallet', 'Card', 'PG', 'Amount', 'App %', 'App amount', 'Customer %', 'Charge',
-                'Our %', 'Our charge', 'Profit', 'Other value',
+                '#', 'Date', 'Wallet', 'Card', 'PG', 'Amount', 'App %', 'App charge amount', 'Customer %', 'Customer amount',
+                'Our %', 'Our charges', 'Other value', 'Net profit',
                 ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? ['Edit'] : []),
               ]}
               rows={txnPL.map((t, idx) => [
@@ -629,13 +619,13 @@ export const Reports: React.FC = () => {
                 <span className="whitespace-nowrap">{t.pgName}</span>,
                 formatCurrency(t.actualAmount),
                 formatWorkbookPct(t.appPct),
-                formatCurrency(t.grossAmount),
+                formatCurrency(t.appCharges),
                 formatWorkbookPct(t.customerPct),
-                formatCurrency(t.shopCharges),
+                formatCurrency(t.customerAmount),
                 formatWorkbookPct(t.ourPct),
                 formatCurrency(t.ourCharge),
+                formatCurrency(t.otherValue),
                 <span className={`font-bold ${t.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(t.netProfit)}</span>,
-                formatCurrency(t.transferExpense),
                 ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT
                   ? [
                       <button

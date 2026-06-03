@@ -116,6 +116,39 @@ export function parseSwipeInflowEconomics(t: Transaction, allTxns: Transaction[]
   };
 }
 
+/** Franchise / workbook P&L: customer fee, our margin, gap (other value), net after portal. */
+export type SwipeInflowFranchisePL = {
+  customerChargePct: number;
+  customerAmount: number;
+  ourChargePct: number;
+  ourChargeAmount: number;
+  otherValue: number;
+  netProfit: number;
+};
+
+export function computeSwipeInflowFranchisePL(
+  t: Transaction,
+  econ: SwipeInflowEconomics
+): SwipeInflowFranchisePL {
+  const amount = econ.actualAmount;
+  const customerAmount = econ.shopCharges;
+  const customerChargePct =
+    t.metadata?.customerChargePct ??
+    (amount > 0 ? (customerAmount / amount) * 100 : 0);
+  const ourChargePct = t.metadata?.ourChargePct ?? customerChargePct;
+  const ourChargeAmount = roundCurrency((amount * ourChargePct) / 100);
+  const otherValue = roundCurrency(customerAmount - ourChargeAmount);
+  const netProfit = roundCurrency(ourChargeAmount - econ.appCharges);
+  return {
+    customerChargePct,
+    customerAmount,
+    ourChargePct,
+    ourChargeAmount,
+    otherValue,
+    netProfit,
+  };
+}
+
 export function inferPgName(wallet: Wallet | undefined, cardType: string | undefined, appPct: number): string {
   if (!wallet?.pgs?.length) return '—';
   const key = (cardType || 'visa').toLowerCase() as keyof Rates;

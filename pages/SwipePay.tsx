@@ -54,6 +54,8 @@ export const SwipePay: React.FC = () => {
   const [cardType, setCardType] = useState('visa');
   const [swipeAmount, setSwipeAmount] = useState<string>('');
   const [currentServiceRate, setCurrentServiceRate] = useState<string>('0');
+  /** Editable margin % for this swipe (not the wallet PG / portal MDR). */
+  const [ourChargeRate, setOurChargeRate] = useState<string>('0');
 
   // --- Step 2: Outflow / Payout Details ---
   const [outflowWalletId, setOutflowWalletId] = useState(wallets[0]?.id || ''); // Pay FROM this wallet (money leaves wallet)
@@ -139,6 +141,7 @@ export const SwipePay: React.FC = () => {
   useEffect(() => {
     const rate = commissionRates[cardType as keyof Rates] ?? '0';
     setCurrentServiceRate(String(rate));
+    setOurChargeRate(String(rate));
   }, [cardType, commissionRates]);
 
   useEffect(() => {
@@ -224,12 +227,14 @@ export const SwipePay: React.FC = () => {
   const resolvedPortalPct = portalPctFromPg(selectedPG, cardType);
   const amountVal = safeParseFloat(swipeAmount);
   const serviceRateVal = safeParseFloat(currentServiceRate);
+  const ourRateVal = safeParseFloat(ourChargeRate);
   const serviceFeeAmount = roundCurrency((amountVal * serviceRateVal) / 100);
+  const ourChargeAmount = roundCurrency((amountVal * ourRateVal) / 100);
 
   const portalFeeAmount = roundCurrency((amountVal * resolvedPortalPct) / 100);
 
   const netPayableToCustomer = roundCurrency(amountVal - serviceFeeAmount);
-  const estimatedProfit = roundCurrency(serviceFeeAmount - portalFeeAmount);
+  const estimatedProfit = roundCurrency(ourChargeAmount - portalFeeAmount);
 
   // Payout Math (Step 2) - Transfer fee is an expense that reduces net outflow
   const payVal = safeParseFloat(payoutAmount);
@@ -243,6 +248,8 @@ export const SwipePay: React.FC = () => {
     else if (amountVal <= 0) err.swipeAmount = 'Swipe amount must be greater than 0';
     const rateVal = safeParseFloat(currentServiceRate);
     if (isNaN(rateVal) || rateVal < 0 || rateVal > 100) err.currentServiceRate = 'Rate must be between 0 and 100%';
+    const ourVal = safeParseFloat(ourChargeRate);
+    if (isNaN(ourVal) || ourVal < 0 || ourVal > 100) err.ourChargeRate = 'Our charge must be between 0 and 100%';
     setStep1Errors(err);
     if (Object.keys(err).length > 0 || !selectedWallet || !customerId) return;
     if (!selectedWallet.pgs?.length) {
@@ -287,6 +294,8 @@ export const SwipePay: React.FC = () => {
           walletId: selectedWallet.id,
           cardType: cardType,
           pgName: pgForPost.name,
+          customerChargePct: serviceRateVal,
+          ourChargePct: ourVal,
         }
       );
       if (p && typeof (p as Promise<unknown>).then === 'function') await p;
@@ -502,25 +511,38 @@ export const SwipePay: React.FC = () => {
                     <form onSubmit={handleStep1Submit} className="space-y-6 animate-fade-in">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <Select label="Inflow Wallet" value={swipeWalletId} onChange={e => setSwipeWalletId(e.target.value)} options={wallets.map(w => ({ label: w.name, value: w.id }))} />
-                        <Select
-                          label="Payment gateway"
-                          value={pgName}
-                          onChange={(e) => setPgName(e.target.value)}
-                          options={
-                            (selectedWallet?.pgs?.length ?? 0) > 0
-                              ? selectedWallet!.pgs.map((p) => ({ label: p.name, value: p.name }))
-                              : [{ label: 'Add a PG in Masters → Wallets', value: '' }]
-                          }
-                          disabled={!selectedWallet?.pgs?.length}
-                        />
+                        <div className="space-y-2">
+                          <Select
+                            label="Payment gateway"
+                            value={pgName}
+                            onChange={(e) => setPgName(e.target.value)}
+                            options={
+                              (selectedWallet?.pgs?.length ?? 0) > 0
+                                ? selectedWallet!.pgs.map((p) => ({ label: p.name, value: p.name }))
+                                : [{ label: 'Add a PG in Masters → Wallets', value: '' }]
+                            }
+                            disabled={!selectedWallet?.pgs?.length}
+                          />
+                          <div
+                            className="flex items-center justify-between gap-3 rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-slate-50/90 dark:bg-slate-800/60 px-4 py-2.5"
+                            title="Portal MDR from Masters → Wallets for this PG and card type (not our charge)"
+                          >
+                            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                              PG % · {cardType}
+                            </span>
+                            <span className="text-sm font-black text-slate-800 dark:text-slate-100 tabular-nums">
+                              {selectedPG ? `${resolvedPortalPct}%` : '—'}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <Select label="Card Type" value={cardType} onChange={e => setCardType(e.target.value)} options={[{label:'Visa',value:'visa'},{label:'Master',value:'master'},{label:'Amex',value:'amex'},{label:'Rupay',value:'rupay'}]} />
                         <Input label="Swipe Amount (₹)" type="number" className="text-xl font-bold" value={swipeAmount} onChange={e => { setSwipeAmount(e.target.value); setStep1Errors(p => ({...p, swipeAmount: ''})); }} error={step1Errors.swipeAmount} placeholder="0" />
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <Input label="Customer charge %" type="number" step="0.1" value={currentServiceRate} onChange={e => { setCurrentServiceRate(e.target.value); setStep1Errors(p => ({...p, currentServiceRate: ''})); }} error={step1Errors.currentServiceRate} title="Commission charged to the customer for this card" />
-                        <Input label="Our charge %" type="number" step="0.01" value={String(resolvedPortalPct)} readOnly className="bg-slate-50 dark:bg-slate-800/60 cursor-not-allowed" title={`From Masters → Wallets (${selectedPG?.name ?? 'PG'}) for this card type. Edit there to change.`} />
+                        <Input label="Customer charge %" type="number" step="0.1" value={currentServiceRate} onChange={e => { setCurrentServiceRate(e.target.value); setStep1Errors(p => ({...p, currentServiceRate: ''})); }} error={step1Errors.currentServiceRate} title="Total fee % charged to the customer for this card" />
+                        <Input label="Our charge %" type="number" step="0.1" value={ourChargeRate} onChange={e => { setOurChargeRate(e.target.value); setStep1Errors(p => ({...p, ourChargeRate: ''})); }} error={step1Errors.ourChargeRate} title="Your margin % on this swipe (editable per deal — separate from PG % above)" />
                       </div>
                       <Button type="submit" size="lg" className="w-full h-14 text-lg" loading={inflowLoading}>Process Inflow <ArrowRight size={20}/></Button>
                     </form>
@@ -697,12 +719,16 @@ export const SwipePay: React.FC = () => {
                      <span className="text-2xl font-black text-white tabular-nums">{formatCurrency(amountVal)}</span>
                    </div>
                    <div className="flex justify-between items-center">
-                     <span className="text-base font-semibold text-rose-300">Our charge ({resolvedPortalPct}%)</span>
+                     <span className="text-base font-semibold text-rose-300">PG charge ({resolvedPortalPct}%)</span>
                      <span className="text-lg font-bold text-white tabular-nums">-{formatCurrency(portalFeeAmount)}</span>
                    </div>
-                   <div className="flex justify-between items-center pb-5 border-b-2 border-slate-600">
+                   <div className="flex justify-between items-center">
                      <span className="text-base font-semibold text-indigo-300">Customer charge ({serviceRateVal}%)</span>
                      <span className="text-lg font-bold text-white tabular-nums">-{formatCurrency(serviceFeeAmount)}</span>
+                   </div>
+                   <div className="flex justify-between items-center pb-5 border-b-2 border-slate-600">
+                     <span className="text-base font-semibold text-violet-300">Our charge ({ourRateVal}%)</span>
+                     <span className="text-lg font-bold text-white tabular-nums">{formatCurrency(ourChargeAmount)}</span>
                    </div>
                    <div className="pt-5">
                      <p className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2">Net Payable to Customer</p>
@@ -710,7 +736,7 @@ export const SwipePay: React.FC = () => {
                    </div>
                    <div className="mt-6 pt-5 border-t-2 border-slate-600 space-y-2">
                      <p className="text-xs font-semibold text-slate-400 leading-snug">
-                       Margin is held in ledger (L003) until you record payout outflow and link this inflow; only then it books to Service Charges (P&L).
+                       PG % is from Masters (portal MDR). Our charge % is your margin on this swipe. Pre-settlement estimate = our charge − PG fee.
                      </p>
                      <div className="flex justify-between items-center">
                        <span className="text-base font-semibold text-slate-300">Pre-settlement estimate</span>

@@ -98,6 +98,10 @@ export interface TransactionMetadata {
   walletId?: string;
   /** Swipe inflow: which wallet PG (portal) was used — matches Masters wallet PG name. */
   pgName?: string;
+  /** Swipe inflow: customer fee % charged on this swipe. */
+  customerChargePct?: number;
+  /** Swipe inflow: our margin % (may be lower than customer % on franchise deals). */
+  ourChargePct?: number;
   cardType?: string;
   relatedTransactionId?: string;
   /** Swipe outflow: ledger id of the Swipe Inflow tx whose margin (L003) to recognise into I001. */
