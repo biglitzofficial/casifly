@@ -106,6 +106,8 @@ export interface TransactionMetadata {
   relatedTransactionId?: string;
   /** Swipe outflow: ledger id of the Swipe Inflow tx whose margin (L003) to recognise into I001. */
   relatedInflowId?: string;
+  /** Swipe outflow: additional fee booked to income (added to linked inflow P&L net profit). */
+  extraCharges?: number;
   storeId?: string; // Product/store id for analytics
   performedByUserId?: string; // Staff who executed the transaction (for analytics)
 }

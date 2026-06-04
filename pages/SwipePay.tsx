@@ -61,6 +61,7 @@ export const SwipePay: React.FC = () => {
   const [outflowWalletId, setOutflowWalletId] = useState(wallets[0]?.id || ''); // Pay FROM this wallet (money leaves wallet)
   const [payoutAmount, setPayoutAmount] = useState<string>('');
   const [transferCommission, setTransferCommission] = useState<string>('0'); // e.g. IMPS charge
+  const [extraCharges, setExtraCharges] = useState<string>('0'); // added to P&L profit on linked inflow
   const [transactionNote, setTransactionNote] = useState('');
   const [inflowLoading, setInflowLoading] = useState(false);
   const [outflowLoading, setOutflowLoading] = useState(false);
@@ -239,6 +240,7 @@ export const SwipePay: React.FC = () => {
   // Payout Math (Step 2) - Transfer fee is an expense that reduces net outflow
   const payVal = safeParseFloat(payoutAmount);
   const transCommVal = safeParseFloat(transferCommission);
+  const extraChargesVal = safeParseFloat(extraCharges);
   const finalPayoutResult = roundCurrency(Math.max(0, payVal - transCommVal));
 
   const handleStep1Submit = async (e: React.FormEvent) => {
@@ -315,8 +317,13 @@ export const SwipePay: React.FC = () => {
     else if (payVal <= 0) err.payoutAmount = 'Settlement amount must be greater than 0';
     if (transferCommission !== '' && (isNaN(transCommVal) || transCommVal < 0)) err.transferCommission = 'Transfer fee must be 0 or more';
     if (transCommVal > payVal) err.transferCommission = 'Transfer fee cannot exceed settlement amount';
-    if (unsettledInflows.length > 0 && !linkedInflowId.trim()) {
-      err.linkedInflow = 'Select the swipe inflow this payout settles to recognise margin in P&L.';
+    if (extraCharges !== '' && (isNaN(extraChargesVal) || extraChargesVal < 0)) err.extraCharges = 'Extra charges must be 0 or more';
+    if (!linkedInflowId.trim()) {
+      if (extraChargesVal > 0.005) {
+        err.linkedInflow = 'Link the swipe inflow so extra charges add to that row’s net profit in Transaction P&L.';
+      } else if (unsettledInflows.length > 0) {
+        err.linkedInflow = 'Select the swipe inflow this payout settles to recognise margin in P&L.';
+      }
     }
     setStep2Errors(err);
     if (Object.keys(err).length > 0) return;
@@ -361,15 +368,22 @@ export const SwipePay: React.FC = () => {
         { accountId: 'I001', debit: 0, credit: marginToRecognize }
       );
     }
+    if (extraChargesVal > 0.005) {
+      entries.push(
+        { accountId: 'L001', debit: extraChargesVal, credit: 0 },
+        { accountId: 'I001', debit: 0, credit: extraChargesVal }
+      );
+    }
 
       const p = postTransaction(
-        `Payout Outflow: ${customerName}`,
+        `Payout Outflow: ${customerName}${extraChargesVal > 0.005 ? ` (+${extraChargesVal} extra)` : ''}`,
         TransactionType.SWIPE_PAY,
         entries,
         {
           customerId: customerId || undefined,
           walletId: outflowWallet.id,
           relatedInflowId: linkId || undefined,
+          extraCharges: extraChargesVal > 0.005 ? extraChargesVal : undefined,
         }
       );
       if (p && typeof (p as Promise<unknown>).then === 'function') await p;
@@ -379,6 +393,7 @@ export const SwipePay: React.FC = () => {
     resetCustomer();
     setPayoutAmount('');
     setTransferCommission('0');
+    setExtraCharges('0');
     setStep2Errors({});
     } finally { setOutflowLoading(false); }
   };
@@ -412,6 +427,7 @@ export const SwipePay: React.FC = () => {
                 setOutflowPickerQuery('');
                 setPayoutAmount('');
                 setTransferCommission('0');
+                setExtraCharges('0');
                 setStep2Errors({});
                 setLinkedInflowId('');
               }}
@@ -661,9 +677,10 @@ export const SwipePay: React.FC = () => {
 
                   {isPhoneLocked && !isNewCustomer && (
                     <form onSubmit={handleStep2Submit} className="space-y-6">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <Input label="Settlement Amount (₹)" type="number" value={payoutAmount} onChange={e => { setPayoutAmount(e.target.value); setStep2Errors(p => ({...p, payoutAmount: ''})); }} className="font-bold" error={step2Errors.payoutAmount} placeholder="0" />
                         <Input label="Wallet Transfer Fee (₹)" type="number" value={transferCommission} onChange={e => { setTransferCommission(e.target.value); setStep2Errors(p => ({...p, transferCommission: ''})); }} error={step2Errors.transferCommission} placeholder="0" />
+                        <Input label="Extra charges (₹)" type="number" value={extraCharges} onChange={e => { setExtraCharges(e.target.value); setStep2Errors(p => ({...p, extraCharges: ''})); }} error={step2Errors.extraCharges} placeholder="0" title="Additional income on this payout — added directly to net profit in Transaction P&L when inflow is linked" />
                       </div>
                       <Select 
                         label="Pay From Wallet" 
@@ -750,14 +767,26 @@ export const SwipePay: React.FC = () => {
                      <span className="text-base font-semibold text-slate-200">Liability Settle</span>
                      <span className="text-2xl font-black text-white tabular-nums">{formatCurrency(payVal)}</span>
                    </div>
-                   <div className="flex justify-between items-center pb-5 border-b-2 border-slate-600">
+                   <div className="flex justify-between items-center">
                      <span className="text-base font-semibold text-rose-300">Transfer Commission</span>
                      <span className="text-lg font-bold text-white tabular-nums">+{formatCurrency(transCommVal)}</span>
                    </div>
+                   {extraChargesVal > 0.005 && (
+                     <div className="flex justify-between items-center pb-5 border-b-2 border-slate-600">
+                       <span className="text-base font-semibold text-amber-300">Extra charges (→ profit)</span>
+                       <span className="text-lg font-bold text-amber-200 tabular-nums">+{formatCurrency(extraChargesVal)}</span>
+                     </div>
+                   )}
+                   {extraChargesVal <= 0.005 && <div className="pb-5 border-b-2 border-slate-600" />}
                    <div className="pt-5">
                      <p className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-2">Total Result (Net Outflow)</p>
                      <p className="text-4xl font-black text-emerald-400 tabular-nums">{formatCurrency(finalPayoutResult)}</p>
                    </div>
+                   {extraChargesVal > 0.005 && (
+                     <p className="text-xs text-slate-400 leading-snug">
+                       Extra charges do not change wallet outflow; they book as income and add to Transaction P&L net profit when you link the matching inflow.
+                     </p>
+                   )}
                 </div>
               )}
             </CardContent>

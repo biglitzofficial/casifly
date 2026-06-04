@@ -18,6 +18,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import { exportToCSV } from '../lib/export';
+import { roundCurrency } from '../lib/utils';
 import { Button } from '../components/ui/Elements';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -25,6 +26,7 @@ import {
   parseSwipeInflowEconomics,
   inferPgName,
   computeSwipeInflowFranchisePL,
+  sumSwipeExtraChargesForInflow,
   deferredSwipePortalExpenseInSubset,
 } from '../lib/swipeTxnEconomics';
 import { buildPaySwipePLRows } from '../lib/paySwipeTxnReport';
@@ -183,7 +185,8 @@ export const Reports: React.FC = () => {
       .filter(t => isSwipePayInflow(t))
       .map(t => {
         const econ = parseSwipeInflowEconomics(t, filteredTransactions)!;
-        const franchise = computeSwipeInflowFranchisePL(t, econ);
+        const extraCharges = sumSwipeExtraChargesForInflow(t.id, filteredTransactions);
+        const franchise = computeSwipeInflowFranchisePL(t, econ, extraCharges);
         const customer = customers.find(c => c.id === t.metadata?.customerId);
         const wallet = wallets.find(w => w.id === t.metadata?.walletId);
         const cardRaw = (t.metadata?.cardType || 'visa').toUpperCase();
@@ -215,6 +218,7 @@ export const Reports: React.FC = () => {
           ourPct: franchise.ourChargePct,
           ourCharge: franchise.ourChargeAmount,
           otherValue: franchise.otherValue,
+          extraCharges,
           netProfit: franchise.netProfit,
         };
       });
@@ -234,6 +238,29 @@ export const Reports: React.FC = () => {
     return data;
   }, [filteredTransactions, customers, wallets, user?.id, user?.name, txnCustomerFilter, txnWalletFilter, txnSortBy]);
 
+  const txnPLTotals = useMemo(() => {
+    const sums = txnPL.reduce(
+      (acc, r) => {
+        acc.amount += r.actualAmount;
+        acc.appCharges += r.appCharges;
+        acc.customerAmount += r.customerAmount;
+        acc.ourCharge += r.ourCharge;
+        acc.otherValue += r.otherValue;
+        acc.netProfit += r.netProfit;
+        return acc;
+      },
+      { amount: 0, appCharges: 0, customerAmount: 0, ourCharge: 0, otherValue: 0, netProfit: 0 }
+    );
+    return {
+      amount: roundCurrency(sums.amount),
+      appCharges: roundCurrency(sums.appCharges),
+      customerAmount: roundCurrency(sums.customerAmount),
+      ourCharge: roundCurrency(sums.ourCharge),
+      otherValue: roundCurrency(sums.otherValue),
+      netProfit: roundCurrency(sums.netProfit),
+    };
+  }, [txnPL]);
+
   const paySwipeTxnPL = useMemo(() => {
     let data = buildPaySwipePLRows(filteredTransactions, wallets, accounts, customers, user?.id, user?.name);
     if (txnCustomerFilter !== 'all') {
@@ -251,6 +278,27 @@ export const Reports: React.FC = () => {
     });
     return data;
   }, [filteredTransactions, wallets, accounts, customers, user?.id, user?.name, txnCustomerFilter, txnWalletFilter, txnSortBy]);
+
+  const paySwipeTxnPLTotals = useMemo(() => {
+    const sums = paySwipeTxnPL.reduce(
+      (acc, r) => {
+        acc.principal += r.principal;
+        acc.mdrCost += r.mdrCost;
+        acc.netToWallet += r.netToWallet;
+        acc.chargesCollected += r.chargesCollected;
+        acc.netMargin += r.netMargin;
+        return acc;
+      },
+      { principal: 0, mdrCost: 0, netToWallet: 0, chargesCollected: 0, netMargin: 0 }
+    );
+    return {
+      principal: roundCurrency(sums.principal),
+      mdrCost: roundCurrency(sums.mdrCost),
+      netToWallet: roundCurrency(sums.netToWallet),
+      chargesCollected: roundCurrency(sums.chargesCollected),
+      netMargin: roundCurrency(sums.netMargin),
+    };
+  }, [paySwipeTxnPL]);
 
   const totalPL = calculatePL(filteredTransactions);
 
@@ -639,6 +687,25 @@ export const Reports: React.FC = () => {
                     ]
                   : []),
               ])}
+              footerRow={[
+                '',
+                <span className="font-bold text-slate-900 uppercase tracking-wide">Total</span>,
+                '',
+                '',
+                '',
+                formatCurrency(txnPLTotals.amount),
+                '—',
+                formatCurrency(txnPLTotals.appCharges),
+                '—',
+                formatCurrency(txnPLTotals.customerAmount),
+                '—',
+                formatCurrency(txnPLTotals.ourCharge),
+                formatCurrency(txnPLTotals.otherValue),
+                <span className={`font-bold ${txnPLTotals.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                  {formatCurrency(txnPLTotals.netProfit)}
+                </span>,
+                ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? [''] : []),
+              ]}
               rightAlignColumns={[5, 6, 7, 8, 9, 10, 11, 12, 13]}
             />
             ) : (
@@ -676,6 +743,25 @@ export const Reports: React.FC = () => {
                     ]
                   : []),
               ])}
+              footerRow={[
+                '',
+                <span className="font-bold text-slate-900 uppercase tracking-wide">Total</span>,
+                '',
+                '',
+                '',
+                '',
+                '',
+                formatCurrency(paySwipeTxnPLTotals.principal),
+                formatCurrency(paySwipeTxnPLTotals.mdrCost),
+                formatCurrency(paySwipeTxnPLTotals.netToWallet),
+                formatCurrency(paySwipeTxnPLTotals.chargesCollected),
+                '',
+                <span className={`font-bold ${paySwipeTxnPLTotals.netMargin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                  {formatCurrency(paySwipeTxnPLTotals.netMargin)}
+                </span>,
+                '',
+                ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? [''] : []),
+              ]}
               rightAlignColumns={[7, 8, 9, 10, 11, 12]}
             />
             )}
@@ -768,7 +854,19 @@ const KPICard = ({ title, value, icon, color, bg, gradient }: any) => (
   </div>
 );
 
-const DataTable = ({ headers, rows, rightAlignColumns = [], minTableWidth }: { headers: string[], rows: any[][], rightAlignColumns?: number[], minTableWidth?: number }) => (
+const DataTable = ({
+  headers,
+  rows,
+  footerRow,
+  rightAlignColumns = [],
+  minTableWidth,
+}: {
+  headers: string[];
+  rows: React.ReactNode[][];
+  footerRow?: React.ReactNode[];
+  rightAlignColumns?: number[];
+  minTableWidth?: number;
+}) => (
   <div className="overflow-x-auto rounded-xl border border-slate-100 overflow-hidden">
     <table className="w-full text-sm" style={minTableWidth ? { minWidth: minTableWidth } : undefined}>
       <thead className="bg-slate-50 border-b border-slate-200">
@@ -801,6 +899,20 @@ const DataTable = ({ headers, rows, rightAlignColumns = [], minTableWidth }: { h
           ))
         )}
       </tbody>
+      {footerRow && rows.length > 0 && footerRow.length === headers.length && (
+        <tfoot className="bg-slate-100 border-t-2 border-slate-300">
+          <tr>
+            {footerRow.map((cell, j) => (
+              <td
+                key={j}
+                className={`p-4 text-slate-900 font-bold tabular-nums ${rightAlignColumns.includes(j) ? 'text-right' : 'text-left'}`}
+              >
+                {cell}
+              </td>
+            ))}
+          </tr>
+        </tfoot>
+      )}
     </table>
   </div>
 );

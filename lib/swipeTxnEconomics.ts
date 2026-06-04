@@ -126,9 +126,22 @@ export type SwipeInflowFranchisePL = {
   netProfit: number;
 };
 
+/** Sum extra charges from outflows linked to this swipe inflow. */
+export function sumSwipeExtraChargesForInflow(inflowId: string, transactions: Transaction[]): number {
+  let sum = 0;
+  for (const t of transactions) {
+    if (t.status !== 'COMPLETED' || t.type !== TransactionType.SWIPE_PAY) continue;
+    if (t.metadata?.relatedInflowId !== inflowId) continue;
+    const extra = Number(t.metadata?.extraCharges) || 0;
+    if (extra > 0.005) sum += extra;
+  }
+  return roundCurrency(sum);
+}
+
 export function computeSwipeInflowFranchisePL(
   t: Transaction,
-  econ: SwipeInflowEconomics
+  econ: SwipeInflowEconomics,
+  extraChargesAddOn = 0
 ): SwipeInflowFranchisePL {
   const amount = econ.actualAmount;
   const customerAmount = econ.shopCharges;
@@ -138,7 +151,7 @@ export function computeSwipeInflowFranchisePL(
   const ourChargePct = t.metadata?.ourChargePct ?? customerChargePct;
   const ourChargeAmount = roundCurrency((amount * ourChargePct) / 100);
   const otherValue = roundCurrency(customerAmount - ourChargeAmount);
-  const netProfit = roundCurrency(ourChargeAmount - econ.appCharges);
+  const netProfit = roundCurrency(ourChargeAmount - econ.appCharges + extraChargesAddOn);
   return {
     customerChargePct,
     customerAmount,
