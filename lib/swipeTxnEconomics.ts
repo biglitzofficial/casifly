@@ -29,15 +29,58 @@ export function swipeInflowPendingMarginAmount(t: Transaction): number {
   return roundCurrency(sumAcct(t.entries, 'L003', 'credit'));
 }
 
-/** An outflow has already posted I001 for this inflow (metadata link). */
-export function isSwipeInflowMarginSettledInBooks(inflowId: string, transactions: Transaction[]): boolean {
-  return transactions.some(
-    (ot) =>
-      ot.type === TransactionType.SWIPE_PAY &&
-      ot.status === 'COMPLETED' &&
-      ot.metadata?.relatedInflowId === inflowId &&
-      sumAcct(ot.entries, 'I001', 'credit') > 0.005
+/** Outflow that settled this inflow's L003 margin into I001 (metadata link or journal match). */
+export function resolveOutflowLinkedInflowId(o: Transaction, transactions: Transaction[]): string | undefined {
+  const explicit = o.metadata?.relatedInflowId?.trim();
+  if (explicit) return explicit;
+  if (!isSwipePayOutflow(o)) return undefined;
+  const marginDr = roundCurrency(sumAcct(o.entries, 'L003', 'debit'));
+  const i001Cr = roundCurrency(sumAcct(o.entries, 'I001', 'credit'));
+  if (marginDr < 0.005 && i001Cr < 0.005) return undefined;
+  const matchAmount = marginDr > 0.005 ? marginDr : i001Cr;
+  const cid = o.metadata?.customerId;
+  if (!cid) return undefined;
+  const candidates = transactions.filter(
+    (t) =>
+      isSwipePayInflow(t) &&
+      t.metadata?.customerId === cid &&
+      Math.abs(swipeInflowPendingMarginAmount(t) - matchAmount) < 0.02
   );
+  if (candidates.length === 0) return undefined;
+  if (candidates.length === 1) return candidates[0].id;
+  const oTime = new Date(o.date).getTime();
+  candidates.sort(
+    (a, b) =>
+      Math.abs(new Date(a.date).getTime() - oTime) - Math.abs(new Date(b.date).getTime() - oTime)
+  );
+  return candidates[0].id;
+}
+
+/** An outflow has already posted I001 for this inflow (metadata link or margin journal match). */
+export function isSwipeInflowMarginSettledInBooks(inflowId: string, transactions: Transaction[]): boolean {
+  if (
+    transactions.some(
+      (ot) =>
+        ot.type === TransactionType.SWIPE_PAY &&
+        ot.status === 'COMPLETED' &&
+        ot.metadata?.relatedInflowId === inflowId &&
+        sumAcct(ot.entries, 'I001', 'credit') > 0.005
+    )
+  ) {
+    return true;
+  }
+  const inflow = transactions.find((t) => t.id === inflowId);
+  if (!inflow || !isSwipePayInflow(inflow)) return false;
+  const margin = swipeInflowPendingMarginAmount(inflow);
+  if (margin < 0.005) return false;
+  const cid = inflow.metadata?.customerId;
+  return transactions.some((ot) => {
+    if (!isSwipePayOutflow(ot) || ot.metadata?.customerId !== cid) return false;
+    return (
+      Math.abs(sumAcct(ot.entries, 'L003', 'debit') - margin) < 0.02 &&
+      sumAcct(ot.entries, 'I001', 'credit') > 0.005
+    );
+  });
 }
 
 /** Legacy: I001 credited on inflow. New: I001 only after linked outflow. */
@@ -141,7 +184,8 @@ export function sumSwipeExtraChargesForInflow(inflowId: string, transactions: Tr
 export function computeSwipeInflowFranchisePL(
   t: Transaction,
   econ: SwipeInflowEconomics,
-  extraChargesAddOn = 0
+  extraChargesAddOn = 0,
+  transferFeeDeduction = 0
 ): SwipeInflowFranchisePL {
   const amount = econ.actualAmount;
   const customerAmount = econ.shopCharges;
@@ -151,7 +195,9 @@ export function computeSwipeInflowFranchisePL(
   const ourChargePct = t.metadata?.ourChargePct ?? customerChargePct;
   const ourChargeAmount = roundCurrency((amount * ourChargePct) / 100);
   const otherValue = roundCurrency(customerAmount - ourChargeAmount);
-  const netProfit = roundCurrency(ourChargeAmount - econ.appCharges + extraChargesAddOn);
+  const netProfit = roundCurrency(
+    ourChargeAmount - econ.appCharges + extraChargesAddOn - transferFeeDeduction
+  );
   return {
     customerChargePct,
     customerAmount,
@@ -186,8 +232,9 @@ export function localDayKey(isoDate: string): string {
 }
 
 /**
- * Same-day payout transfer (E001 on outflow) split evenly across swipe inflows for that customer
- * within the given transaction set (e.g. filtered by date). Remainder from rounding goes to the last inflow.
+ * Payout wallet transfer fee (E001 on outflow) attributed per swipe inflow.
+ * Linked outflows assign the full fee to `relatedInflowId`; unlinked same-day fees split evenly
+ * across recognised inflows for that customer. Remainder from rounding goes to the last inflow.
  */
 export function buildTransferExpensePerInflowId(transactions: Transaction[]): Map<string, number> {
   const inflows = transactions.filter(isSwipePayInflow);
@@ -195,8 +242,24 @@ export function buildTransferExpensePerInflowId(transactions: Transaction[]): Ma
   const outflows = transactions.filter(isSwipePayOutflow);
   const keyOf = (customerId: string, day: string) => `${customerId}|${day}`;
 
+  const outflowToInflow = new Map<string, string>();
+  for (const o of outflows) {
+    const linkId = resolveOutflowLinkedInflowId(o, transactions);
+    if (linkId) outflowToInflow.set(o.id, linkId);
+  }
+
+  const alloc = new Map<string, number>();
+  for (const o of outflows) {
+    const linkId = outflowToInflow.get(o.id);
+    if (!linkId) continue;
+    const fee = transferExpenseFromOutflow(o);
+    if (fee < 0.005) continue;
+    alloc.set(linkId, roundCurrency((alloc.get(linkId) ?? 0) + fee));
+  }
+
   const transferByKey = new Map<string, number>();
   for (const o of outflows) {
+    if (outflowToInflow.has(o.id)) continue;
     const cid = o.metadata?.customerId;
     if (!cid) continue;
     const k = keyOf(cid, localDayKey(o.date));
@@ -213,15 +276,14 @@ export function buildTransferExpensePerInflowId(transactions: Transaction[]): Ma
     inflowsByKey.get(k)!.push(i);
   }
 
-  const alloc = new Map<string, number>();
   for (const i of inflows) {
     if (!recognized(i)) {
-      alloc.set(i.id, 0);
+      if (!alloc.has(i.id)) alloc.set(i.id, 0);
       continue;
     }
     const cid = i.metadata?.customerId;
     if (!cid) {
-      alloc.set(i.id, 0);
+      if (!alloc.has(i.id)) alloc.set(i.id, 0);
       continue;
     }
     const k = keyOf(cid, localDayKey(i.date));
@@ -229,17 +291,20 @@ export function buildTransferExpensePerInflowId(transactions: Transaction[]): Ma
     const n = list.length;
     const totalT = transferByKey.get(k) ?? 0;
     if (n === 0 || totalT < 0.005) {
-      alloc.set(i.id, 0);
+      if (!alloc.has(i.id)) alloc.set(i.id, 0);
       continue;
     }
     const idx = list.findIndex(x => x.id === i.id);
     const base = roundCurrency(totalT / n);
-    if (idx === n - 1) {
-      const prior = roundCurrency(base * (n - 1));
-      alloc.set(i.id, roundCurrency(totalT - prior));
-    } else {
-      alloc.set(i.id, base);
-    }
+    const split =
+      idx === n - 1
+        ? roundCurrency(totalT - roundCurrency(base * (n - 1)))
+        : base;
+    alloc.set(i.id, roundCurrency((alloc.get(i.id) ?? 0) + split));
+  }
+
+  for (const i of inflows) {
+    if (!alloc.has(i.id)) alloc.set(i.id, 0);
   }
 
   return alloc;

@@ -27,6 +27,7 @@ import {
   inferPgName,
   computeSwipeInflowFranchisePL,
   sumSwipeExtraChargesForInflow,
+  buildTransferExpensePerInflowId,
   deferredSwipePortalExpenseInSubset,
 } from '../lib/swipeTxnEconomics';
 import { buildPaySwipePLRows } from '../lib/paySwipeTxnReport';
@@ -180,13 +181,20 @@ export const Reports: React.FC = () => {
     };
   }).sort((a, b) => b.profit - a.profit).slice(0, 10);
 
+  /** Use all books (not date filter) so payout transfer fees still hit inflow net profit. */
+  const transferFeeByInflow = useMemo(
+    () => buildTransferExpensePerInflowId(transactions),
+    [transactions]
+  );
+
   const txnPL = useMemo(() => {
     let data = filteredTransactions
       .filter(t => isSwipePayInflow(t))
       .map(t => {
         const econ = parseSwipeInflowEconomics(t, filteredTransactions)!;
         const extraCharges = sumSwipeExtraChargesForInflow(t.id, filteredTransactions);
-        const franchise = computeSwipeInflowFranchisePL(t, econ, extraCharges);
+        const transferFee = transferFeeByInflow.get(t.id) ?? 0;
+        const franchise = computeSwipeInflowFranchisePL(t, econ, extraCharges, transferFee);
         const customer = customers.find(c => c.id === t.metadata?.customerId);
         const wallet = wallets.find(w => w.id === t.metadata?.walletId);
         const cardRaw = (t.metadata?.cardType || 'visa').toUpperCase();
@@ -219,6 +227,7 @@ export const Reports: React.FC = () => {
           ourCharge: franchise.ourChargeAmount,
           otherValue: franchise.otherValue,
           extraCharges,
+          transferFee,
           netProfit: franchise.netProfit,
         };
       });
@@ -236,7 +245,7 @@ export const Reports: React.FC = () => {
       return 0;
     });
     return data;
-  }, [filteredTransactions, customers, wallets, user?.id, user?.name, txnCustomerFilter, txnWalletFilter, txnSortBy]);
+  }, [filteredTransactions, transferFeeByInflow, customers, wallets, user?.id, user?.name, txnCustomerFilter, txnWalletFilter, txnSortBy]);
 
   const txnPLTotals = useMemo(() => {
     const sums = txnPL.reduce(
@@ -635,7 +644,7 @@ export const Reports: React.FC = () => {
               title={txnPlMode === 'swipe-inflow' ? 'Transaction P&L (Swipe Inflow)' : 'Transaction P&L (Pay & Swipe)'}
               subtitle={
                 txnPlMode === 'swipe-inflow'
-                  ? 'Customer amount = swipe × customer %; Our charges = swipe × our %; Other value = customer amount − our charges (franchise gap); Net profit = our charges − app (portal) charge.'
+                  ? 'Customer amount = swipe × customer %; Our charges = swipe × our %; Other value = customer amount − our charges (franchise gap); Net profit = our charges − app charge − payout transfer fee + extra charges.'
                   : 'Advance = customer receivable (A006) funded from bank/cash/wallet. Recovery = swipe clears receivable, MDR to E001, net to wallet, charges collected to I001. Net margin = charges collected − MDR (recovery rows).'
               }
               action={<Button size="sm" variant="outline" onClick={exportTxnPL}><Download size={14} /> Export CSV</Button>}

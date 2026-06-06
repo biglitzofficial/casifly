@@ -108,6 +108,8 @@ export interface TransactionMetadata {
   relatedInflowId?: string;
   /** Swipe outflow: additional fee booked to income (added to linked inflow P&L net profit). */
   extraCharges?: number;
+  /** Swipe outflow: wallet transfer / IMPS fee (E001) — deducted from linked inflow net profit. */
+  transferFee?: number;
   storeId?: string; // Product/store id for analytics
   performedByUserId?: string; // Staff who executed the transaction (for analytics)
 }

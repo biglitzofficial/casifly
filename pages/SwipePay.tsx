@@ -384,6 +384,7 @@ export const SwipePay: React.FC = () => {
           walletId: outflowWallet.id,
           relatedInflowId: linkId || undefined,
           extraCharges: extraChargesVal > 0.005 ? extraChargesVal : undefined,
+          transferFee: transCommVal > 0.005 ? transCommVal : undefined,
         }
       );
       if (p && typeof (p as Promise<unknown>).then === 'function') await p;
