@@ -39,13 +39,13 @@ export function resolveOutflowLinkedInflowId(o: Transaction, transactions: Trans
   if (marginDr < 0.005 && i001Cr < 0.005) return undefined;
   const matchAmount = marginDr > 0.005 ? marginDr : i001Cr;
   const cid = o.metadata?.customerId;
-  if (!cid) return undefined;
-  const candidates = transactions.filter(
-    (t) =>
-      isSwipePayInflow(t) &&
-      t.metadata?.customerId === cid &&
-      Math.abs(swipeInflowPendingMarginAmount(t) - matchAmount) < 0.02
+  let candidates = transactions.filter(
+    (t) => isSwipePayInflow(t) && Math.abs(swipeInflowPendingMarginAmount(t) - matchAmount) < 0.02
   );
+  if (cid) {
+    const scoped = candidates.filter((t) => t.metadata?.customerId === cid);
+    if (scoped.length > 0) candidates = scoped;
+  }
   if (candidates.length === 0) return undefined;
   if (candidates.length === 1) return candidates[0].id;
   const oTime = new Date(o.date).getTime();
@@ -113,6 +113,8 @@ export function deferredSwipePortalExpenseExcludedFromPl(transactions: Transacti
 }
 
 export function transferExpenseFromOutflow(t: Transaction): number {
+  const meta = Number(t.metadata?.transferFee);
+  if (Number.isFinite(meta) && meta > 0.005) return roundCurrency(meta);
   return roundCurrency(sumAcct(t.entries, 'E001', 'debit'));
 }
 

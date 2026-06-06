@@ -13,7 +13,7 @@ import { safeParseFloat, roundCurrency } from '../lib/utils';
 import { DEFAULT_COMMISSION_RATES } from '../constants';
 import { ArrowRight, ArrowDownToLine, ArrowUpFromLine, Lock, Unlock, CheckCircle2, Info, UserPlus, Save, X, Users } from 'lucide-react';
 import { TypedRecentTransactionsCard } from '../components/TypedRecentTransactionsCard';
-import { TransactionEditModal } from '../components/TransactionEditModal';
+import { TransactionEditRouter } from '../components/TransactionEditRouter';
 import { TEMP_ALLOW_LEDGER_REPORT_PL_EDIT } from '../lib/tempUiFlags';
 
 /** Coerce wallet/API PG charge values (number or string) to a safe rate. */
@@ -822,9 +822,12 @@ export const SwipePay: React.FC = () => {
         />
 
         {editingTxn && TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? (
-          <TransactionEditModal
+          <TransactionEditRouter
             transaction={editingTxn}
             accounts={accounts}
+            customers={customers}
+            wallets={wallets}
+            transactions={transactions}
             formatCurrency={formatCurrency}
             onClose={() => setEditingTxn(null)}
             onSave={(id, patch) => updateTransaction(id, patch)}

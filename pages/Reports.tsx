@@ -31,7 +31,7 @@ import {
   deferredSwipePortalExpenseInSubset,
 } from '../lib/swipeTxnEconomics';
 import { buildPaySwipePLRows } from '../lib/paySwipeTxnReport';
-import { TransactionEditModal } from '../components/TransactionEditModal';
+import { TransactionEditRouter } from '../components/TransactionEditRouter';
 import { TempManualJournalForm } from '../components/TempManualJournalForm';
 import { TEMP_ALLOW_LEDGER_REPORT_PL_EDIT } from '../lib/tempUiFlags';
 
@@ -192,7 +192,7 @@ export const Reports: React.FC = () => {
       .filter(t => isSwipePayInflow(t))
       .map(t => {
         const econ = parseSwipeInflowEconomics(t, filteredTransactions)!;
-        const extraCharges = sumSwipeExtraChargesForInflow(t.id, filteredTransactions);
+        const extraCharges = sumSwipeExtraChargesForInflow(t.id, transactions);
         const transferFee = transferFeeByInflow.get(t.id) ?? 0;
         const franchise = computeSwipeInflowFranchisePL(t, econ, extraCharges, transferFee);
         const customer = customers.find(c => c.id === t.metadata?.customerId);
@@ -829,9 +829,12 @@ export const Reports: React.FC = () => {
       </div>
 
       {editingTxn && TEMP_ALLOW_LEDGER_REPORT_PL_EDIT && (
-        <TransactionEditModal
+        <TransactionEditRouter
           transaction={editingTxn}
           accounts={accounts}
+          customers={customers}
+          wallets={wallets}
+          transactions={transactions}
           formatCurrency={formatCurrency}
           onClose={() => setEditingTxn(null)}
           onSave={(id, patch) => updateTransaction(id, patch)}

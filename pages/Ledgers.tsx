@@ -7,7 +7,7 @@ import { PageFilters, DateRange } from '../components/ui/PageFilters';
 import { X, Info, Download, RotateCcw, ChevronLeft, ChevronRight, Trash2, Pencil } from 'lucide-react';
 import { exportToCSV } from '../lib/export';
 import { Button } from '../components/ui/Elements';
-import { TransactionEditModal } from '../components/TransactionEditModal';
+import { TransactionEditRouter } from '../components/TransactionEditRouter';
 import { TEMP_ALLOW_LEDGER_REPORT_PL_EDIT } from '../lib/tempUiFlags';
 
 const TXN_TYPE_OPTIONS: { value: string; label: string }[] = [
@@ -23,7 +23,7 @@ const ALL_ACCOUNTS = '__all__';
 const PAGE_SIZE = 15;
 
 export const Ledgers: React.FC = () => {
-  const { accounts, wallets, transactions, getAccountBalance, formatCurrency, deleteTransaction, updateTransaction } = useERP();
+  const { accounts, wallets, customers, transactions, getAccountBalance, formatCurrency, deleteTransaction, updateTransaction } = useERP();
   const { confirm } = useConfirm();
   const [selectedAccount, setSelectedAccount] = useState(ALL_ACCOUNTS);
   const [viewingTxn, setViewingTxn] = useState<Transaction | null>(null);
@@ -405,9 +405,12 @@ export const Ledgers: React.FC = () => {
       </div>
 
       {editingTxn && TEMP_ALLOW_LEDGER_REPORT_PL_EDIT && (
-        <TransactionEditModal
+        <TransactionEditRouter
           transaction={editingTxn}
           accounts={accounts}
+          customers={customers}
+          wallets={wallets}
+          transactions={transactions}
           formatCurrency={formatCurrency}
           onClose={() => setEditingTxn(null)}
           onSave={(id, patch) => updateTransaction(id, patch)}
