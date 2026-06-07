@@ -260,10 +260,11 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
                             const ok = await confirm({ title: 'Delete Transaction', message: `Permanently delete "${txn.description}"? This will remove it from all ledgers.`, confirmText: 'Delete', variant: 'danger' });
                             if (ok) deleteTransaction(txn.id);
                           }}
-                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors"
                           title="Delete transaction"
                         >
-                          <Trash2 size={18} />
+                          <Trash2 size={16} />
+                          <span className="hidden sm:inline">Delete</span>
                         </button>
                       </td>
                     </tr>
