@@ -110,6 +110,10 @@ export interface TransactionMetadata {
   extraCharges?: number;
   /** Swipe outflow: wallet transfer / IMPS fee (E001) — deducted from linked inflow net profit. */
   transferFee?: number;
+  /** Mediator payout linked to swipe inflow (franchise / other-value share). */
+  mediatorPayout?: number;
+  /** Note for mediator payout (name, UTR, deal ref, etc.). */
+  mediatorRemarks?: string;
   storeId?: string; // Product/store id for analytics
   performedByUserId?: string; // Staff who executed the transaction (for analytics)
 }
@@ -172,7 +176,7 @@ export interface ProfitAndLoss {
   expenses: { account: Account; balance: number }[];
   totalIncome: number;
   totalExpenses: number;
-  /** Workbook-style: E001 reduced by deferred swipe portal on unsettled inflows (dashboard / P&L tab). */
+  /** Workbook-style: deferred swipe portal excluded; franchise other value (pass-through) excluded from net. */
   netProfit: number;
   /** Raw ledger income − expenses; retained earnings adjustment on balance sheet so A = L + E. */
   netProfitLedger: number;

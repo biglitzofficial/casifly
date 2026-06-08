@@ -56,30 +56,28 @@ export function resolveOutflowLinkedInflowId(o: Transaction, transactions: Trans
   return candidates[0].id;
 }
 
-/** An outflow has already posted I001 for this inflow (metadata link or margin journal match). */
+/** True when margin for this inflow is already in I001 (legacy on inflow, explicit link, or resolved orphan outflow). */
 export function isSwipeInflowMarginSettledInBooks(inflowId: string, transactions: Transaction[]): boolean {
-  if (
-    transactions.some(
-      (ot) =>
-        ot.type === TransactionType.SWIPE_PAY &&
-        ot.status === 'COMPLETED' &&
-        ot.metadata?.relatedInflowId === inflowId &&
-        sumAcct(ot.entries, 'I001', 'credit') > 0.005
-    )
-  ) {
-    return true;
-  }
   const inflow = transactions.find((t) => t.id === inflowId);
-  if (!inflow || !isSwipePayInflow(inflow)) return false;
-  const margin = swipeInflowPendingMarginAmount(inflow);
-  if (margin < 0.005) return false;
-  const cid = inflow.metadata?.customerId;
-  return transactions.some((ot) => {
-    if (!isSwipePayOutflow(ot) || ot.metadata?.customerId !== cid) return false;
-    return (
-      Math.abs(sumAcct(ot.entries, 'L003', 'debit') - margin) < 0.02 &&
-      sumAcct(ot.entries, 'I001', 'credit') > 0.005
-    );
+  if (inflow && sumAcct(inflow.entries, 'I001', 'credit') > 0.005) return true;
+  return transactions.some(
+    (ot) =>
+      ot.type === TransactionType.SWIPE_PAY &&
+      ot.status === 'COMPLETED' &&
+      sumAcct(ot.entries, 'I001', 'credit') > 0.005 &&
+      (ot.metadata?.relatedInflowId === inflowId ||
+        resolveOutflowLinkedInflowId(ot, transactions) === inflowId)
+  );
+}
+
+/** Swipe inflows with L003 margin still awaiting a linked payout outflow. */
+export function swipeInflowsAwaitingPayout(transactions: Transaction[], customerId?: string): Transaction[] {
+  return transactions.filter((t) => {
+    if (t.type !== TransactionType.SWIPE_PAY || t.status !== 'COMPLETED') return false;
+    if (customerId && t.metadata?.customerId !== customerId) return false;
+    if (!isSwipePayInflow(t)) return false;
+    if (swipeInflowPendingMarginAmount(t) < 0.005) return false;
+    return !isSwipeInflowMarginSettledInBooks(t.id, transactions);
   });
 }
 
@@ -310,4 +308,58 @@ export function buildTransferExpensePerInflowId(transactions: Transaction[]): Ma
   }
 
   return alloc;
+}
+
+/** Franchise pass-through on swipe inflows (customer fee − our fee) — still in ledger I001 but not your margin. */
+export function totalSwipeFranchiseOtherValue(transactions: Transaction[]): number {
+  const transferByInflow = buildTransferExpensePerInflowId(transactions);
+  let sum = 0;
+  for (const t of transactions) {
+    if (t.status !== 'COMPLETED' || !isSwipePayInflow(t)) continue;
+    const econ = parseSwipeInflowEconomics(t, transactions);
+    if (!econ) continue;
+    const extra = sumSwipeExtraChargesForInflow(t.id, transactions);
+    const transferFee = transferByInflow.get(t.id) ?? 0;
+    const { otherValue } = computeSwipeInflowFranchisePL(t, econ, extra, transferFee);
+    if (otherValue > 0.005) sum += otherValue;
+  }
+  return roundCurrency(sum);
+}
+
+/** Mediator / franchise payouts (E004) linked to a swipe inflow. */
+export function sumMediatorPayoutForInflow(inflowId: string, transactions: Transaction[]): number {
+  let sum = 0;
+  for (const t of transactions) {
+    if (t.status !== 'COMPLETED') continue;
+    if (t.metadata?.relatedInflowId !== inflowId) continue;
+    const meta = Number(t.metadata?.mediatorPayout);
+    if (meta > 0.005) {
+      sum += meta;
+      continue;
+    }
+    const e004 = roundCurrency(sumAcct(t.entries, 'E004', 'debit'));
+    if (e004 > 0.005) sum += e004;
+  }
+  return roundCurrency(sum);
+}
+
+export function mediatorRemarksForInflow(inflowId: string, transactions: Transaction[]): string {
+  const parts: string[] = [];
+  for (const t of transactions) {
+    if (t.status !== 'COMPLETED' || t.metadata?.relatedInflowId !== inflowId) continue;
+    const r = t.metadata?.mediatorRemarks?.trim();
+    if (r) parts.push(r);
+  }
+  return parts.join('; ');
+}
+
+export function mediatorDueForInflow(inflow: Transaction, transactions: Transaction[]): number {
+  if (!isSwipePayInflow(inflow)) return 0;
+  const econ = parseSwipeInflowEconomics(inflow, transactions);
+  if (!econ) return 0;
+  const extra = sumSwipeExtraChargesForInflow(inflow.id, transactions);
+  const transferFee = buildTransferExpensePerInflowId(transactions).get(inflow.id) ?? 0;
+  const { otherValue } = computeSwipeInflowFranchisePL(inflow, econ, extra, transferFee);
+  const paid = sumMediatorPayoutForInflow(inflow.id, transactions);
+  return roundCurrency(Math.max(0, otherValue - paid));
 }

@@ -6,7 +6,7 @@ import {
 } from '../types';
 import { INITIAL_ACCOUNTS, INITIAL_CUSTOMERS, INITIAL_WALLETS } from '../constants';
 import { formatCurrency, generateId, roundCurrency, txnOnOrBeforeLocalDay, normalizeLedgerEntries } from '../lib/utils';
-import { deferredSwipePortalExpenseExcludedFromPl } from '../lib/swipeTxnEconomics';
+import { deferredSwipePortalExpenseExcludedFromPl, totalSwipeFranchiseOtherValue } from '../lib/swipeTxnEconomics';
 import { useToast } from './ToastContext';
 import { useAuth } from './AuthContext';
 import { api, USE_API } from '../lib/api';
@@ -658,7 +658,9 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const totalIncome = income.reduce((sum, item) => sum + item.balance, 0);
     const totalExpenses = expenses.reduce((sum, item) => sum + item.balance, 0);
-    const netProfit = roundCurrency(totalIncome - totalExpenses);
+    const completed = transactionsForUser.filter(t => t.status === 'COMPLETED');
+    const franchiseOther = totalSwipeFranchiseOtherValue(completed);
+    const netProfit = roundCurrency(totalIncome - totalExpenses - franchiseOther);
     const totalExpensesLedger = accounts
       .filter(a => a.type === AccountType.EXPENSE)
       .reduce((sum, a) => sum + getAccountBalance(a.id), 0);
@@ -718,7 +720,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           const s = seedById.get(a.id);
           return s ? { ...s } : { ...a, balance: 0 };
         }
-        if (['I001', 'I002', 'E001', 'E002', 'E003', 'L001', 'A006'].includes(a.id)) {
+        if (['I001', 'I002', 'E001', 'E002', 'E003', 'E004'].includes(a.id)) {
           return { ...a, balance: 0 };
         }
         if (a.type === AccountType.LIABILITY && a.category === 'Customer') {

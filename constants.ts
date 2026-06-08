@@ -28,6 +28,7 @@ export const INITIAL_ACCOUNTS: Account[] = [
   { id: 'E001', name: 'Wallet MDR Charges', type: AccountType.EXPENSE, category: 'Expense', balance: 0 },
   { id: 'E002', name: 'Wallet Deficit', type: AccountType.EXPENSE, category: 'Expense', balance: 0 },
   { id: 'E003', name: 'Office Rent', type: AccountType.EXPENSE, category: 'Expense', balance: 0 },
+  { id: 'E004', name: 'Mediator / Franchise Payout', type: AccountType.EXPENSE, category: 'Expense', balance: 0 },
 ];
 
 export const INITIAL_CUSTOMERS: Customer[] = [

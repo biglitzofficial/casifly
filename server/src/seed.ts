@@ -22,6 +22,7 @@ const INITIAL_ACCOUNTS = [
   { id: 'E001', name: 'Wallet MDR Charges', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
   { id: 'E002', name: 'Wallet Deficit', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
   { id: 'E003', name: 'Office Rent', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
+  { id: 'E004', name: 'Mediator / Franchise Payout', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
 ];
 
 const INITIAL_CUSTOMERS = [

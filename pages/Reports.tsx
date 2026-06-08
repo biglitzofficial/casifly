@@ -28,6 +28,8 @@ import {
   computeSwipeInflowFranchisePL,
   sumSwipeExtraChargesForInflow,
   buildTransferExpensePerInflowId,
+  sumMediatorPayoutForInflow,
+  mediatorRemarksForInflow,
   deferredSwipePortalExpenseInSubset,
 } from '../lib/swipeTxnEconomics';
 import { buildPaySwipePLRows } from '../lib/paySwipeTxnReport';
@@ -150,7 +152,7 @@ export const Reports: React.FC = () => {
     txns.forEach(t => {
       t.entries.forEach(e => {
         if (e.accountId === 'I001' || e.accountId === 'I002') income += e.credit;
-        if (['E001', 'E002', 'E003'].includes(e.accountId)) expense += e.debit;
+        if (['E001', 'E002', 'E003', 'E004'].includes(e.accountId)) expense += e.debit;
       });
     });
     const deferredPortal = deferredSwipePortalExpenseInSubset(txns, filteredTransactions);
@@ -228,6 +230,9 @@ export const Reports: React.FC = () => {
           otherValue: franchise.otherValue,
           extraCharges,
           transferFee,
+          mediatorPaid: sumMediatorPayoutForInflow(t.id, transactions),
+          mediatorDue: roundCurrency(Math.max(0, franchise.otherValue - sumMediatorPayoutForInflow(t.id, transactions))),
+          mediatorRemarks: mediatorRemarksForInflow(t.id, transactions),
           netProfit: franchise.netProfit,
         };
       });
@@ -255,10 +260,12 @@ export const Reports: React.FC = () => {
         acc.customerAmount += r.customerAmount;
         acc.ourCharge += r.ourCharge;
         acc.otherValue += r.otherValue;
+        acc.mediatorPaid += r.mediatorPaid;
+        acc.mediatorDue += r.mediatorDue;
         acc.netProfit += r.netProfit;
         return acc;
       },
-      { amount: 0, appCharges: 0, customerAmount: 0, ourCharge: 0, otherValue: 0, netProfit: 0 }
+      { amount: 0, appCharges: 0, customerAmount: 0, ourCharge: 0, otherValue: 0, mediatorPaid: 0, mediatorDue: 0, netProfit: 0 }
     );
     return {
       amount: roundCurrency(sums.amount),
@@ -266,6 +273,8 @@ export const Reports: React.FC = () => {
       customerAmount: roundCurrency(sums.customerAmount),
       ourCharge: roundCurrency(sums.ourCharge),
       otherValue: roundCurrency(sums.otherValue),
+      mediatorPaid: roundCurrency(sums.mediatorPaid),
+      mediatorDue: roundCurrency(sums.mediatorDue),
       netProfit: roundCurrency(sums.netProfit),
     };
   }, [txnPL]);
@@ -367,7 +376,7 @@ export const Reports: React.FC = () => {
     }
     const headers = [
       '#', 'Date', 'Wallet', 'Card', 'PG', 'Amount', 'App %', 'App charge amount', 'Customer %', 'Customer amount',
-      'Our %', 'Our charges', 'Other value', 'Net profit',
+      'Our %', 'Our charges', 'Other value', 'Mediator paid', 'Mediator due', 'Remarks', 'Net profit',
     ];
     const rows = txnPL.map((r, i) => [
       String(i + 1),
@@ -383,6 +392,9 @@ export const Reports: React.FC = () => {
       formatWorkbookPct(r.ourPct),
       formatCurrency(r.ourCharge),
       formatCurrency(r.otherValue),
+      formatCurrency(r.mediatorPaid),
+      formatCurrency(r.mediatorDue),
+      r.mediatorRemarks || '—',
       formatCurrency(r.netProfit),
     ]);
     exportToCSV('transaction-pl-swipe-inflow', headers, rows);
@@ -644,7 +656,7 @@ export const Reports: React.FC = () => {
               title={txnPlMode === 'swipe-inflow' ? 'Transaction P&L (Swipe Inflow)' : 'Transaction P&L (Pay & Swipe)'}
               subtitle={
                 txnPlMode === 'swipe-inflow'
-                  ? 'Customer amount = swipe × customer %; Our charges = swipe × our %; Other value = customer amount − our charges (franchise gap); Net profit = our charges − app charge − payout transfer fee + extra charges.'
+                  ? 'Customer amount = swipe × customer %; Our charges = swipe × our %; Other value = franchise gap; Mediator paid via Swipe & Pay → Mediator Payout; Net profit = our charges − app − transfer fee + extra.'
                   : 'Advance = customer receivable (A006) funded from bank/cash/wallet. Recovery = swipe clears receivable, MDR to E001, net to wallet, charges collected to I001. Net margin = charges collected − MDR (recovery rows).'
               }
               action={<Button size="sm" variant="outline" onClick={exportTxnPL}><Download size={14} /> Export CSV</Button>}
@@ -662,10 +674,10 @@ export const Reports: React.FC = () => {
             </p>
             {txnPlMode === 'swipe-inflow' ? (
             <DataTable 
-              minTableWidth={TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? 1320 : 1280}
+              minTableWidth={TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? 1680 : 1640}
               headers={[
                 '#', 'Date', 'Wallet', 'Card', 'PG', 'Amount', 'App %', 'App charge amount', 'Customer %', 'Customer amount',
-                'Our %', 'Our charges', 'Other value', 'Net profit',
+                'Our %', 'Our charges', 'Other value', 'Mediator paid', 'Mediator due', 'Remarks', 'Net profit',
                 ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? ['Edit'] : []),
               ]}
               rows={txnPL.map((t, idx) => [
@@ -682,6 +694,9 @@ export const Reports: React.FC = () => {
                 formatWorkbookPct(t.ourPct),
                 formatCurrency(t.ourCharge),
                 formatCurrency(t.otherValue),
+                formatCurrency(t.mediatorPaid),
+                formatCurrency(t.mediatorDue),
+                <span className="max-w-[9rem] truncate block text-xs text-slate-600" title={t.mediatorRemarks}>{t.mediatorRemarks || '—'}</span>,
                 <span className={`font-bold ${t.netProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(t.netProfit)}</span>,
                 ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT
                   ? [
@@ -710,12 +725,15 @@ export const Reports: React.FC = () => {
                 '—',
                 formatCurrency(txnPLTotals.ourCharge),
                 formatCurrency(txnPLTotals.otherValue),
+                formatCurrency(txnPLTotals.mediatorPaid),
+                formatCurrency(txnPLTotals.mediatorDue),
+                '',
                 <span className={`font-bold ${txnPLTotals.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                   {formatCurrency(txnPLTotals.netProfit)}
                 </span>,
                 ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? [''] : []),
               ]}
-              rightAlignColumns={[5, 6, 7, 8, 9, 10, 11, 12, 13]}
+              rightAlignColumns={[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16]}
             />
             ) : (
             <DataTable

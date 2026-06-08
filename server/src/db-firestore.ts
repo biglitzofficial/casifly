@@ -303,6 +303,7 @@ export const firestoreDb = {
       { id: 'E001', name: 'Wallet MDR Charges', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
       { id: 'E002', name: 'Wallet Deficit', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
       { id: 'E003', name: 'Office Rent', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
+      { id: 'E004', name: 'Mediator / Franchise Payout', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
     ];
     const INITIAL_CUSTOMERS = [
       { id: 'C001', name: 'Rahul Sharma', phone: '9876543210', commission_rates: JSON.stringify({ visa: 2.0, master: 2.0, amex: 3.0, rupay: 1.5 }), ledger_account_id: 'L001', store_id: null, joined_at: new Date().toISOString() },
@@ -380,7 +381,7 @@ export const firestoreDb = {
       await b.commit();
     }
 
-    const zeroIds = new Set(['A004', 'A005', 'A006', 'I001', 'I002', 'E001', 'E002', 'E003', 'L001', 'L003']);
+    const zeroIds = new Set(['A004', 'A005', 'A006', 'I001', 'I002', 'E001', 'E002', 'E003', 'E004', 'L001', 'L003']);
     batch = f.batch();
     zeroIds.forEach((id) => {
       batch.update(f.collection(C.accounts).doc(id), { balance: 0 });

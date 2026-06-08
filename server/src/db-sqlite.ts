@@ -254,6 +254,7 @@ export const sqliteDb = {
       { id: 'E001', name: 'Wallet MDR Charges', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
       { id: 'E002', name: 'Wallet Deficit', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
       { id: 'E003', name: 'Office Rent', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
+      { id: 'E004', name: 'Mediator / Franchise Payout', type: 'EXPENSE', category: 'Expense', balance: 0, store_id: null },
     ];
     const INITIAL_CUSTOMERS = [
       { id: 'C001', name: 'Rahul Sharma', phone: '9876543210', commission_rates: JSON.stringify({ visa: 2.0, master: 2.0, amex: 3.0, rupay: 1.5 }), ledger_account_id: 'L001', store_id: null, joined_at: null },
@@ -296,7 +297,7 @@ export const sqliteDb = {
     for (const w of INITIAL_WALLETS) {
       insWallet.run(w.id, w.name, w.ledger_account_id, w.pgs, w.store_id);
     }
-    sqlite.prepare("UPDATE accounts SET balance = 0 WHERE id IN ('A004','A005','A006','I001','I002','E001','E002','E003','L001','L003')").run();
+    sqlite.prepare("UPDATE accounts SET balance = 0 WHERE id IN ('A004','A005','A006','I001','I002','E001','E002','E003','E004','L001','L003')").run();
     sqlite.prepare("UPDATE accounts SET balance = 0 WHERE type = 'LIABILITY' AND category = 'Customer'").run();
     sqlite.prepare("UPDATE accounts SET name = 'Wallet A (Razorpay)' WHERE id = 'A004'").run();
     sqlite.prepare("UPDATE accounts SET name = 'Wallet B (Paytm)' WHERE id = 'A005'").run();

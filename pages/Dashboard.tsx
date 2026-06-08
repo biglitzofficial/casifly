@@ -121,6 +121,7 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
           icon={<Sparkles className="w-6 h-6 text-amber-600" />} 
           trend="+12%" 
           color="amber"
+          subtitle="Your margin only — franchise pass-through excluded"
         />
       </div>
 
@@ -439,14 +440,17 @@ const colorMap: Record<string, string> = {
   amber: 'from-amber-500/20 to-amber-600/10 border-amber-200/60',
 };
 
-const MetricCard = ({ title, amount, icon, trend, color }: any) => (
+const MetricCard = ({ title, amount, icon, trend, color, subtitle }: { title: string; amount: string; icon: React.ReactNode; trend: string; color: string; subtitle?: string }) => (
   <div className={`group relative overflow-hidden bg-white/95 backdrop-blur-md p-8 rounded-3xl border-2 bg-gradient-to-br ${colorMap[color] || colorMap.indigo} transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.15)] min-w-0`}>
     <div className="absolute top-0 right-0 w-32 h-32 bg-white/20 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl group-hover:scale-150 transition-transform duration-500" />
     <div className="relative flex items-start gap-3 mb-2">
       <div className="p-2.5 bg-white/90 rounded-xl shadow-md border border-white/80 shrink-0">
         {icon}
       </div>
-      <p className="text-xs font-bold text-slate-600 uppercase tracking-widest pt-1">{title}</p>
+      <div className="min-w-0">
+        <p className="text-xs font-bold text-slate-600 uppercase tracking-widest pt-1">{title}</p>
+        {subtitle ? <p className="text-[10px] text-slate-500 font-medium mt-0.5 leading-snug normal-case tracking-normal">{subtitle}</p> : null}
+      </div>
     </div>
     <div className="relative min-w-0 pr-0">
       <h3 

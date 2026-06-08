@@ -7,13 +7,15 @@ import {
   isSwipePayInflow,
   isSwipeInflowMarginSettledInBooks,
   swipeInflowPendingMarginAmount,
+  swipeInflowsAwaitingPayout,
 } from '../lib/swipeTxnEconomics';
 import { Card, CardContent, CardHeader, Input, Select, Button } from '../components/ui/Elements';
 import { safeParseFloat, roundCurrency } from '../lib/utils';
 import { DEFAULT_COMMISSION_RATES } from '../constants';
-import { ArrowRight, ArrowDownToLine, ArrowUpFromLine, Lock, Unlock, CheckCircle2, Info, UserPlus, Save, X, Users } from 'lucide-react';
+import { ArrowRight, ArrowDownToLine, ArrowUpFromLine, Lock, Unlock, CheckCircle2, Info, UserPlus, Save, X, Users, HandCoins } from 'lucide-react';
 import { TypedRecentTransactionsCard } from '../components/TypedRecentTransactionsCard';
 import { TransactionEditRouter } from '../components/TransactionEditRouter';
+import { MediatorPayoutPanel } from '../components/MediatorPayoutPanel';
 import { TEMP_ALLOW_LEDGER_REPORT_PL_EDIT } from '../lib/tempUiFlags';
 
 /** Coerce wallet/API PG charge values (number or string) to a safe rate. */
@@ -36,7 +38,7 @@ export const SwipePay: React.FC = () => {
   const toast = useToast();
 
   // --- Mode: Inflow or Outflow (separate entries) ---
-  const [mode, setMode] = useState<'inflow' | 'outflow'>('inflow');
+  const [mode, setMode] = useState<'inflow' | 'outflow' | 'mediator'>('inflow');
 
   // --- Step 1: Customer & Inflow Details ---
   const [phone, setPhone] = useState('');
@@ -72,22 +74,18 @@ export const SwipePay: React.FC = () => {
 
   /** All Swipe & Pay journals — shown below the workflow for audit / correction. */
   const swipePayList = useMemo(
-    () => transactions.filter((t) => t.type === TransactionType.SWIPE_PAY),
+    () =>
+      transactions.filter(
+        (t) =>
+          t.type === TransactionType.SWIPE_PAY ||
+          (t.type === TransactionType.JOURNAL && Number(t.metadata?.mediatorPayout) > 0.005),
+      ),
     [transactions],
   );
 
   /** All swipe inflows still awaiting linked payout (margin in L003). */
   const allPendingSwipeInflows = useMemo(
-    () =>
-      transactions.filter(
-        (t) =>
-          t.type === TransactionType.SWIPE_PAY &&
-          t.status === 'COMPLETED' &&
-          !!t.metadata?.customerId &&
-          isSwipePayInflow(t) &&
-          swipeInflowPendingMarginAmount(t) > 0.005 &&
-          !isSwipeInflowMarginSettledInBooks(t.id, transactions)
-      ),
+    () => swipeInflowsAwaitingPayout(transactions),
     [transactions]
   );
 
@@ -124,8 +122,8 @@ export const SwipePay: React.FC = () => {
 
   const unsettledInflows = useMemo(() => {
     if (!customerId || mode !== 'outflow') return [];
-    return allPendingSwipeInflows.filter((t) => t.metadata?.customerId === customerId);
-  }, [allPendingSwipeInflows, customerId, mode]);
+    return swipeInflowsAwaitingPayout(transactions, customerId);
+  }, [transactions, customerId, mode]);
 
   // --- Logic ---
   const selectedWallet = wallets.find(w => w.id === swipeWalletId);
@@ -149,6 +147,11 @@ export const SwipePay: React.FC = () => {
     if (!linkedInflowId) return;
     if (!unsettledInflows.some((t) => t.id === linkedInflowId)) setLinkedInflowId('');
   }, [unsettledInflows, linkedInflowId]);
+
+  useEffect(() => {
+    if (mode !== 'outflow' || !isPhoneLocked || !customerId) return;
+    if (unsettledInflows.length === 1) setLinkedInflowId(unsettledInflows[0].id);
+  }, [mode, isPhoneLocked, customerId, unsettledInflows]);
 
   const handlePhoneSearch = () => {
     if (phone.length !== 10) return;
@@ -321,8 +324,13 @@ export const SwipePay: React.FC = () => {
     if (!linkedInflowId.trim()) {
       if (extraChargesVal > 0.005) {
         err.linkedInflow = 'Link the swipe inflow so extra charges add to that row’s net profit in Transaction P&L.';
-      } else if (unsettledInflows.length > 0) {
-        err.linkedInflow = 'Select the swipe inflow this payout settles to recognise margin in P&L.';
+      } else {
+        const pendingForCustomer = customerId
+          ? swipeInflowsAwaitingPayout(transactions, customerId)
+          : [];
+        if (pendingForCustomer.length > 0) {
+          err.linkedInflow = 'Select the swipe inflow this payout settles to recognise margin in P&L.';
+        }
       }
     }
     setStep2Errors(err);
@@ -412,11 +420,11 @@ export const SwipePay: React.FC = () => {
         
         <div className="lg:col-span-2 space-y-6">
           {/* Mode Tabs: Separate Inflow | Outflow entries */}
-          <div className="flex gap-2 p-2 bg-slate-100 rounded-2xl">
+          <div className="flex gap-2 p-2 bg-slate-100 rounded-2xl flex-wrap">
             <button
               type="button"
               onClick={() => { setMode('inflow'); resetCustomer(); setSwipeAmount(''); setStep1Errors({}); setLinkedInflowId(''); }}
-              className={`flex-1 flex items-center justify-center gap-2 py-4 px-6 rounded-xl font-bold text-sm uppercase tracking-wider transition-all ${mode === 'inflow' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-200'}`}
+              className={`flex-1 min-w-[140px] flex items-center justify-center gap-2 py-4 px-4 rounded-xl font-bold text-xs sm:text-sm uppercase tracking-wider transition-all ${mode === 'inflow' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-200'}`}
             >
               <ArrowDownToLine size={20} /> Inflow Entry
             </button>
@@ -432,12 +440,29 @@ export const SwipePay: React.FC = () => {
                 setStep2Errors({});
                 setLinkedInflowId('');
               }}
-              className={`flex-1 flex items-center justify-center gap-2 py-4 px-6 rounded-xl font-bold text-sm uppercase tracking-wider transition-all ${mode === 'outflow' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-200'}`}
+              className={`flex-1 min-w-[140px] flex items-center justify-center gap-2 py-4 px-4 rounded-xl font-bold text-xs sm:text-sm uppercase tracking-wider transition-all ${mode === 'outflow' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-200'}`}
             >
               <ArrowUpFromLine size={20} /> Outflow Entry
             </button>
+            <button
+              type="button"
+              onClick={() => { setMode('mediator'); resetCustomer(); setStep1Errors({}); setStep2Errors({}); }}
+              className={`flex-1 min-w-[140px] flex items-center justify-center gap-2 py-4 px-4 rounded-xl font-bold text-xs sm:text-sm uppercase tracking-wider transition-all ${mode === 'mediator' ? 'bg-violet-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-200'}`}
+            >
+              <HandCoins size={20} /> Mediator Payout
+            </button>
           </div>
 
+          {mode === 'mediator' ? (
+            <MediatorPayoutPanel
+              transactions={transactions}
+              customers={customers}
+              wallets={wallets}
+              accounts={accounts}
+              formatCurrency={formatCurrency}
+              postTransaction={postTransaction}
+            />
+          ) : (
           <Card className={`border-t-4 ${mode === 'inflow' ? 'border-t-indigo-500' : 'border-t-emerald-500'}`}>
             <CardHeader 
               title={mode === 'inflow' ? "Inflow Data Entry" : "Outflow Data Entry"} 
@@ -708,7 +733,11 @@ export const SwipePay: React.FC = () => {
                           />
                           {step2Errors.linkedInflow ? (
                             <p className="mt-2 text-sm font-medium text-rose-600">{step2Errors.linkedInflow}</p>
-                          ) : null}
+                          ) : (
+                            <p className="mt-2 text-xs text-slate-500">
+                              Required so profit books correctly on Transaction P&amp;L for this swipe.
+                            </p>
+                          )}
                         </div>
                       )}
                       <Input label="Internal Note" placeholder="IMPS Ref / Transfer Reason" value={transactionNote} onChange={e => setTransactionNote(e.target.value)} />
@@ -719,6 +748,7 @@ export const SwipePay: React.FC = () => {
               )}
             </CardContent>
           </Card>
+          )}
         </div>
 
         {/* --- SIDE CALCULATION PANEL --- */}
@@ -762,7 +792,7 @@ export const SwipePay: React.FC = () => {
                      </div>
                    </div>
                 </div>
-              ) : (
+              ) : mode === 'outflow' ? (
                 <div className="space-y-6">
                    <div className="flex justify-between items-center">
                      <span className="text-base font-semibold text-slate-200">Liability Settle</span>
@@ -788,6 +818,11 @@ export const SwipePay: React.FC = () => {
                        Extra charges do not change wallet outflow; they book as income and add to Transaction P&L net profit when you link the matching inflow.
                      </p>
                    )}
+                </div>
+              ) : (
+                <div className="space-y-4 text-sm text-slate-300 leading-relaxed">
+                  <p>Pay the <strong className="text-violet-300">mediator / franchise share</strong> (other value) for a swipe inflow.</p>
+                  <p className="text-slate-400">Cash leaves wallet, bank, or cash account → books to Mediator Payout (E004). Remarks show on Transaction P&amp;L.</p>
                 </div>
               )}
             </CardContent>
@@ -815,8 +850,10 @@ export const SwipePay: React.FC = () => {
             (t.metadata?.customerId ? customers.find((c) => c.id === t.metadata!.customerId)?.name : undefined)
           }
           subtitleForTxn={(t) =>
-            wallets.find((w) => w.id === t.metadata?.walletId)?.name ??
-            (isSwipePayInflow(t) ? 'Inflow / swipe' : 'Outflow / payout')
+            Number(t.metadata?.mediatorPayout) > 0.005
+              ? 'Mediator payout'
+              : wallets.find((w) => w.id === t.metadata?.walletId)?.name ??
+                (isSwipePayInflow(t) ? 'Inflow / swipe' : 'Outflow / payout')
           }
           onEditTxn={(t) => setEditingTxn(t)}
         />
