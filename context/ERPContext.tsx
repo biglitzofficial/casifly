@@ -10,6 +10,7 @@ import { deferredSwipePortalExpenseExcludedFromPl, totalSwipeFranchiseOtherValue
 import { useToast } from './ToastContext';
 import { useAuth } from './AuthContext';
 import { api, USE_API } from '../lib/api';
+import { canDeleteBankCashAccount } from '../lib/chartOfAccounts';
 
 interface ERPContextType {
   accounts: Account[];
@@ -29,12 +30,14 @@ interface ERPContextType {
   updateCustomer: (id: string, data: Partial<Customer>) => void;
   deleteCustomer: (id: string) => void;
   addWallet: (data: CreateWalletDTO) => void;
-  updateWallet: (id: string, data: Partial<Pick<Wallet, 'name'>>) => void;
+  updateWallet: (id: string, data: Partial<Pick<Wallet, 'name' | 'walletKind'>>) => void;
   deleteWallet: (id: string) => void;
   addWalletPG: (walletId: string, pgConfig: PGConfig) => void;
   updateWalletPG: (walletId: string, oldPgName: string, pgConfig: PGConfig) => void;
   removeWalletPG: (walletId: string, pgName: string) => void;
   addAccount: (data: { name: string; category: 'Bank' | 'Cash' }) => void;
+  updateAccount: (id: string, data: { name: string }) => void | Promise<void>;
+  deleteAccount: (id: string) => void | Promise<void>;
   /**
    * Opening / retained-earnings adjustment on wallet ledger.
    * Positive: Dr wallet / Cr Q002. Negative: Dr Q002 / Cr wallet (reduces opening).
@@ -124,7 +127,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       /** Seed banks (A002/A003) may be store-scoped in DB while UI merges full COA — without this, Pay & Swipe posts to bank IDs fail validation and never hit the ledger. */
       setAccounts(missingCoa.length ? [...mapped, ...missingCoa] : mapped);
       setCustomers((custs as any[]).map(c => ({ id: c.id, name: c.name, phone: c.phone, commissionRates: c.commissionRates, ledgerAccountId: c.ledgerAccountId, joinedAt: c.joinedAt, storeId: c.storeId })));
-      setWallets((wals as any[]).map(w => ({ id: w.id, name: w.name, ledgerAccountId: w.ledgerAccountId, pgs: w.pgs, storeId: w.storeId })));
+      setWallets((wals as any[]).map(w => ({ id: w.id, name: w.name, ledgerAccountId: w.ledgerAccountId, pgs: w.pgs, storeId: w.storeId, walletKind: w.walletKind })));
       setTransactions((txns as any[]).map(t => ({ id: t.id, date: t.date, description: t.description, type: t.type, entries: normalizeLedgerEntries(t.entries), status: t.status ?? 'COMPLETED', metadata: t.metadata, referenceId: t.referenceId })));
     } catch (e) {
       console.error('ERP fetch failed', e);
@@ -389,6 +392,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           charges: data.charges,
           storeId: data.storeId,
           openingBalance: opening > 0 ? opening : undefined,
+          walletKind: data.walletKind,
         })
         .then(() => refreshFromApi())
         .catch((e: any) => toast.error(e?.message || 'Failed to add wallet'));
@@ -413,6 +417,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         charges: data.charges
       }],
       storeId: data.storeId,
+      walletKind: data.walletKind,
     };
 
     setAccounts(prev => [...prev, newAccount]);
@@ -464,11 +469,11 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => {});
   };
 
-  const updateWallet = (id: string, data: Partial<Pick<Wallet, 'name'>>) => {
+  const updateWallet = (id: string, data: Partial<Pick<Wallet, 'name' | 'walletKind'>>) => {
     const wallet = allWallets.find(w => w.id === id);
     if (!wallet) return;
     if (USE_API) {
-      api.updateWallet(id, { name: data.name }).then(() => refreshFromApi()).catch((e: any) => toast.error(e?.message || 'Update failed'));
+      api.updateWallet(id, { name: data.name, walletKind: data.walletKind }).then(() => refreshFromApi()).catch((e: any) => toast.error(e?.message || 'Update failed'));
       return;
     }
     setWallets(prev => prev.map(w => (w.id === id ? { ...w, ...data } : w)));
@@ -549,6 +554,43 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const id = generateId('A');
     const newAccount: Account = { id, name: data.name, type: AccountType.ASSET, category: data.category, balance: 0 };
     setAccounts(prev => [...prev, newAccount]);
+  };
+
+  const updateAccount = async (id: string, data: { name: string }) => {
+    const name = data.name.trim();
+    if (!name) {
+      toast.error('Account name is required');
+      return;
+    }
+    const acc = accounts.find((a) => a.id === id);
+    if (!acc || (acc.category !== 'Bank' && acc.category !== 'Cash')) {
+      toast.error('Only bank and cash accounts can be renamed here.');
+      return;
+    }
+    if (USE_API) {
+      await api.updateAccount(id, { name }).then(() => refreshFromApi()).catch((e: any) => toast.error(e?.message || 'Update failed'));
+      return;
+    }
+    setAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, name } : a)));
+  };
+
+  const deleteAccount = async (id: string) => {
+    const acc = accounts.find((a) => a.id === id);
+    if (!acc || (acc.category !== 'Bank' && acc.category !== 'Cash')) {
+      toast.error('Only bank and cash accounts can be deleted here.');
+      return;
+    }
+    const balance = getAccountBalance(id);
+    const check = canDeleteBankCashAccount(id, balance, transactions);
+    if (!check.ok) {
+      toast.error(check.reason || 'Cannot delete this account');
+      return;
+    }
+    if (USE_API) {
+      await api.deleteAccount(id).then(() => refreshFromApi()).catch((e: any) => toast.error(e?.message || 'Delete failed'));
+      return;
+    }
+    setAccounts((prev) => prev.filter((a) => a.id !== id));
   };
 
   const reconcileWallet = (walletId: string, actualBalance: number) => {
@@ -800,6 +842,8 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       updateWalletPG,
       removeWalletPG,
       addAccount,
+      updateAccount,
+      deleteAccount,
       recordWalletOpeningBalance,
       generateBalanceSheet,
       generateProfitAndLoss,

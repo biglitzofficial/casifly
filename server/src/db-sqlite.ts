@@ -51,6 +51,14 @@ sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_accounts_store ON accounts(store_id)
 })();
 sqlite.exec(`CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT NOT NULL, commission_rates TEXT NOT NULL, ledger_account_id TEXT NOT NULL, store_id TEXT, joined_at TEXT, FOREIGN KEY (ledger_account_id) REFERENCES accounts(id))`);
 sqlite.exec(`CREATE TABLE IF NOT EXISTS wallets (id TEXT PRIMARY KEY, name TEXT NOT NULL, ledger_account_id TEXT NOT NULL, pgs TEXT NOT NULL, store_id TEXT, FOREIGN KEY (ledger_account_id) REFERENCES accounts(id))`);
+(() => {
+  try {
+    const cols = sqlite.prepare('PRAGMA table_info(wallets)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'wallet_kind')) {
+      sqlite.exec(`ALTER TABLE wallets ADD COLUMN wallet_kind TEXT DEFAULT 'payment'`);
+    }
+  } catch (_) {}
+})();
 sqlite.exec(`CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, date TEXT NOT NULL, description TEXT NOT NULL, type TEXT NOT NULL, entries TEXT NOT NULL, status TEXT DEFAULT 'COMPLETED', metadata TEXT, reference_id TEXT)`);
 sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date)`);
 sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_customers_store ON customers(store_id)`);
@@ -166,7 +174,7 @@ export const sqliteDb = {
   },
   getWallet: (id: string) => Promise.resolve(sqlite.prepare('SELECT * FROM wallets WHERE id = ?').get(id) as any),
   addWallet: (data: any) => {
-    sqlite.prepare('INSERT INTO wallets (id, name, ledger_account_id, pgs, store_id) VALUES (?, ?, ?, ?, ?)').run(data.id, data.name, data.ledger_account_id, data.pgs, data.store_id);
+    sqlite.prepare('INSERT INTO wallets (id, name, ledger_account_id, pgs, store_id, wallet_kind) VALUES (?, ?, ?, ?, ?, ?)').run(data.id, data.name, data.ledger_account_id, data.pgs, data.store_id, data.wallet_kind ?? 'payment');
     return Promise.resolve(data);
   },
   updateWallet: (id: string, updates: any) => {
@@ -176,6 +184,7 @@ export const sqliteDb = {
       sqlite.prepare('UPDATE wallets SET name = ? WHERE id = ?').run(updates.name, id);
       sqlite.prepare('UPDATE accounts SET name = ? WHERE id = ?').run(updates.name, w.ledger_account_id);
     }
+    if (updates.wallet_kind !== undefined) sqlite.prepare('UPDATE wallets SET wallet_kind = ? WHERE id = ?').run(updates.wallet_kind, id);
     if (updates.pgs !== undefined) sqlite.prepare('UPDATE wallets SET pgs = ? WHERE id = ?').run(typeof updates.pgs === 'string' ? updates.pgs : JSON.stringify(updates.pgs), id);
     return Promise.resolve();
   },

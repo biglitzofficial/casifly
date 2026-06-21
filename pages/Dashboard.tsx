@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useERP } from '../context/ERPContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { Layout } from '../components/Layout';
 import { Input, Button } from '../components/ui/Elements';
-import { Wallet, TrendingUp, TrendingDown, DollarSign, Sparkles, X, UserPlus, ChevronLeft, ChevronRight, Receipt, Trash2 } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, DollarSign, Sparkles, X, UserPlus, ChevronLeft, ChevronRight, Receipt, Trash2, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { CreateCustomerDTO, Rates } from '../types';
 import { safeParseFloat } from '../lib/utils';
 import { DEFAULT_COMMISSION_RATES } from '../constants';
+import { buildReceivablesPayablesSummary } from '../lib/receivablesPayables';
 
 const toRateStrings = (r: Rates) => ({ visa: String(r.visa), master: String(r.master), amex: String(r.amex), rupay: String(r.rupay) });
 
@@ -34,6 +35,10 @@ const RECENT_TXN_PAGE_SIZE = 15;
 export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ onNavigate }) => {
   const { accounts, wallets, transactions, customers, addCustomer, formatCurrency, getAccountBalance, deleteTransaction, generateProfitAndLoss } = useERP();
   const plReport = generateProfitAndLoss();
+  const rpSummary = useMemo(
+    () => buildReceivablesPayablesSummary(transactions, wallets, accounts, customers, getAccountBalance),
+    [transactions, wallets, accounts, customers, getAccountBalance]
+  );
   const { confirm } = useConfirm();
   const [showCashSummary, setShowCashSummary] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
@@ -122,6 +127,25 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
           trend="+12%" 
           color="amber"
           subtitle="Your margin only — franchise pass-through excluded"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10 min-w-0">
+        <MetricCard
+          title="Total Receivables"
+          amount={formatCurrency(rpSummary.totalReceivables)}
+          icon={<ArrowDownLeft className="w-6 h-6 text-violet-600" />}
+          trend=""
+          color="violet"
+          subtitle="Pay & Swipe (A006) + office wallets"
+        />
+        <MetricCard
+          title="Total Payables"
+          amount={formatCurrency(rpSummary.totalPayables)}
+          icon={<ArrowUpRight className="w-6 h-6 text-amber-600" />}
+          trend=""
+          color="amber"
+          subtitle="Customer payout (L001) + other value due"
         />
       </div>
 
@@ -460,9 +484,11 @@ const MetricCard = ({ title, amount, icon, trend, color, subtitle }: { title: st
         {amount}
       </h3>
     </div>
-    <div className="relative flex items-center gap-2 text-sm font-bold text-emerald-600 mt-4">
-      <span className="px-2 py-0.5 bg-emerald-100 rounded-lg">{trend}</span>
-      <span className="text-slate-500 font-medium">vs last month</span>
-    </div>
+    {trend ? (
+      <div className="relative flex items-center gap-2 text-sm font-bold text-emerald-600 mt-4">
+        <span className="px-2 py-0.5 bg-emerald-100 rounded-lg">{trend}</span>
+        <span className="text-slate-500 font-medium">vs last month</span>
+      </div>
+    ) : null}
   </div>
 );

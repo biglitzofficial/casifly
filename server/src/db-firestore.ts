@@ -209,7 +209,7 @@ export const firestoreDb = {
     return doc.exists ? { ...doc.data(), id: doc.id } : null;
   },
 
-  async addWallet(data: { id: string; name: string; ledger_account_id: string; pgs: string; store_id: string | null }) {
+  async addWallet(data: { id: string; name: string; ledger_account_id: string; pgs: string; store_id: string | null; wallet_kind?: string }) {
     await fs().collection(C.wallets).doc(data.id).set(data);
     return data;
   },
@@ -224,6 +224,7 @@ export const firestoreDb = {
       }
     }
     if (updates.pgs !== undefined) u.pgs = typeof updates.pgs === 'string' ? updates.pgs : JSON.stringify(updates.pgs);
+    if (updates.wallet_kind !== undefined) u.wallet_kind = updates.wallet_kind;
     if (Object.keys(u).length > 0) await fs().collection(C.wallets).doc(id).update(u);
   },
 

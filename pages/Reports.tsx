@@ -16,6 +16,8 @@ import {
   FileText,
   Download,
   Pencil,
+  ArrowDownLeft,
+  ArrowUpRight,
 } from 'lucide-react';
 import { exportToCSV } from '../lib/export';
 import { roundCurrency } from '../lib/utils';
@@ -33,11 +35,12 @@ import {
   deferredSwipePortalExpenseInSubset,
 } from '../lib/swipeTxnEconomics';
 import { buildPaySwipePLRows } from '../lib/paySwipeTxnReport';
+import { buildReceivablesPayablesSummary } from '../lib/receivablesPayables';
 import { TransactionEditRouter } from '../components/TransactionEditRouter';
 import { TempManualJournalForm } from '../components/TempManualJournalForm';
 import { TEMP_ALLOW_LEDGER_REPORT_PL_EDIT } from '../lib/tempUiFlags';
 
-type ReportTab = 'overview' | 'balance-sheet' | 'pl' | 'transactions' | 'card' | 'wallet' | 'customer';
+type ReportTab = 'overview' | 'balance-sheet' | 'pl' | 'transactions' | 'receivables-payables' | 'card' | 'wallet' | 'customer';
 type TxnPlMode = 'swipe-inflow' | 'pay-swipe';
 
 function localYmd(d: Date): string {
@@ -74,6 +77,7 @@ export const Reports: React.FC = () => {
     formatCurrency,
     generateProfitAndLoss,
     getAccountBalancesAsOf,
+    getAccountBalance,
     updateTransaction,
     postTransaction,
   } = useERP();
@@ -128,6 +132,11 @@ export const Reports: React.FC = () => {
   }, [transactions, dateRange, search, cardNetworkFilter, customers, wallets]);
 
   const plReport = generateProfitAndLoss();
+
+  const rpSummary = useMemo(
+    () => buildReceivablesPayablesSummary(transactions, wallets, accounts, customers, getAccountBalance),
+    [transactions, wallets, accounts, customers, getAccountBalance]
+  );
 
   const walletBalanceCompare = useMemo(() => {
     const balA = getAccountBalancesAsOf(bsCompareDayA);
@@ -428,6 +437,7 @@ export const Reports: React.FC = () => {
         <TabButton id="overview" label="Performance" icon={TrendingUp} active={activeTab} onClick={setActiveTab} />
         <TabButton id="pl" label="Profit & Loss" icon={FileText} active={activeTab} onClick={setActiveTab} />
         <TabButton id="balance-sheet" label="Wallet balances" icon={Scale} active={activeTab} onClick={setActiveTab} />
+        <TabButton id="receivables-payables" label="Receivables & Payables" icon={ArrowDownLeft} active={activeTab} onClick={setActiveTab} />
         <TabButton id="transactions" label="Transaction P&L" icon={ReceiptText} active={activeTab} onClick={setActiveTab} />
         <TabButton id="card" label="By Network" icon={CreditCard} active={activeTab} onClick={setActiveTab} />
         <TabButton id="wallet" label="By Wallet" icon={WalletIcon} active={activeTab} onClick={setActiveTab} />
@@ -538,6 +548,120 @@ export const Reports: React.FC = () => {
             </Card>
           </div>
         )}
+
+        {activeTab === 'receivables-payables' && (
+          <div className="grid grid-cols-1 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className={`p-6 rounded-2xl border-2 ${rpSummary.totalReceivables > 0 ? 'bg-violet-50 border-violet-200' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <ArrowDownLeft className="text-violet-600" size={22} />
+                  <p className="text-xs font-bold uppercase tracking-widest text-violet-800">Total Receivables</p>
+                </div>
+                <p className="text-3xl font-black text-violet-900 tabular-nums">{formatCurrency(rpSummary.totalReceivables)}</p>
+                <p className="text-xs text-violet-800/80 mt-2">Pay &amp; Swipe advances (A006) + office / receivable wallets (e.g. Prakash OFC)</p>
+              </div>
+              <div className={`p-6 rounded-2xl border-2 ${rpSummary.totalPayables > 0 ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <ArrowUpRight className="text-amber-700" size={22} />
+                  <p className="text-xs font-bold uppercase tracking-widest text-amber-900">Total Payables</p>
+                </div>
+                <p className="text-3xl font-black text-amber-950 tabular-nums">{formatCurrency(rpSummary.totalPayables)}</p>
+                <p className="text-xs text-amber-900/80 mt-2">Customer swipe payout (L001) + franchise other value due to mediators</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader
+                  title="Receivables breakdown"
+                  subtitle="Money owed to you — recover via Pay & Swipe or office wallet settlement"
+                  action={
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        exportToCSV(
+                          'receivables',
+                          ['Item', 'Amount', 'Note'],
+                          rpSummary.receivables.map((r) => [r.label, formatCurrency(r.amount), r.detail ?? ''])
+                        )
+                      }
+                    >
+                      <Download size={14} /> Export
+                    </Button>
+                  }
+                />
+                <CardContent className="!pt-0">
+                  {rpSummary.receivables.length === 0 ? (
+                    <p className="text-sm text-slate-500 py-6 text-center">No receivables on the books.</p>
+                  ) : (
+                    <DataTable
+                      headers={['Item', 'Amount', 'Note']}
+                      rows={[
+                        ...rpSummary.receivables.map((r) => [
+                          r.label,
+                          formatCurrency(r.amount),
+                          r.detail ?? '—',
+                        ]),
+                        [
+                          <span className="font-bold">Total receivables</span>,
+                          <span className="font-bold tabular-nums">{formatCurrency(rpSummary.totalReceivables)}</span>,
+                          '',
+                        ],
+                      ]}
+                      rightAlignColumns={[1]}
+                    />
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader
+                  title="Payables breakdown"
+                  subtitle="Money you owe — customer payouts and mediator / franchise share (other value)"
+                  action={
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        exportToCSV(
+                          'payables',
+                          ['Item', 'Amount', 'Note'],
+                          rpSummary.payables.map((p) => [p.label, formatCurrency(p.amount), p.detail ?? ''])
+                        )
+                      }
+                    >
+                      <Download size={14} /> Export
+                    </Button>
+                  }
+                />
+                <CardContent className="!pt-0">
+                  {rpSummary.payables.length === 0 ? (
+                    <p className="text-sm text-slate-500 py-6 text-center">No payables on the books.</p>
+                  ) : (
+                    <DataTable
+                      headers={['Item', 'Amount', 'Note']}
+                      rows={[
+                        ...rpSummary.payables.map((p) => [
+                          p.label,
+                          formatCurrency(p.amount),
+                          p.detail ?? '—',
+                        ]),
+                        [
+                          <span className="font-bold">Total payables</span>,
+                          <span className="font-bold tabular-nums">{formatCurrency(rpSummary.totalPayables)}</span>,
+                          '',
+                        ],
+                      ]}
+                      rightAlignColumns={[1]}
+                    />
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'overview' && (
            <>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

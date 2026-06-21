@@ -95,6 +95,81 @@ erpRouter.post('/accounts', async (req, res) => {
   });
 });
 
+const PROTECTED_COA_IDS = new Set([
+  'A001', 'A002', 'A003', 'A004', 'A005', 'A006',
+  'L001', 'L002', 'L003', 'Q001', 'Q002',
+  'I001', 'I002', 'E001', 'E002', 'E003', 'E004',
+]);
+
+function accountUsedInTxns(transactions: { entries: string | unknown[] }[], accountId: string): boolean {
+  for (const t of transactions) {
+    const entries = typeof t.entries === 'string' ? JSON.parse(t.entries) : t.entries;
+    if (!Array.isArray(entries)) continue;
+    if (entries.some((e: { accountId?: string }) => e.accountId === accountId)) return true;
+  }
+  return false;
+}
+
+erpRouter.put('/accounts/:id', async (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== 'master_admin' && user.role !== 'product_admin') {
+    res.status(403).json({ error: 'Not allowed to edit bank or cash accounts' });
+    return;
+  }
+  const { id } = req.params;
+  const { name } = req.body;
+  if (!name?.trim()) {
+    res.status(400).json({ error: 'Account name required' });
+    return;
+  }
+  const acc = await db.getAccount(id);
+  if (!acc) {
+    res.status(404).json({ error: 'Account not found' });
+    return;
+  }
+  if (acc.category !== 'Bank' && acc.category !== 'Cash') {
+    res.status(400).json({ error: 'Only bank and cash accounts can be edited' });
+    return;
+  }
+  await db.updateAccount(id, { name: name.trim() });
+  res.json({ id, name: name.trim(), type: acc.type, category: acc.category, balance: acc.balance || 0 });
+});
+
+erpRouter.delete('/accounts/:id', async (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== 'master_admin' && user.role !== 'product_admin') {
+    res.status(403).json({ error: 'Not allowed to delete bank or cash accounts' });
+    return;
+  }
+  const { id } = req.params;
+  if (PROTECTED_COA_IDS.has(id)) {
+    res.status(400).json({ error: 'System account cannot be deleted' });
+    return;
+  }
+  const acc = await db.getAccount(id);
+  if (!acc) {
+    res.status(404).json({ error: 'Account not found' });
+    return;
+  }
+  if (acc.category !== 'Bank' && acc.category !== 'Cash') {
+    res.status(400).json({ error: 'Only bank and cash accounts can be deleted' });
+    return;
+  }
+  const storeId = user.productId ?? undefined;
+  const txns = await db.getTransactions(storeId);
+  if (accountUsedInTxns(txns, id)) {
+    res.status(400).json({ error: 'Account has transaction history and cannot be deleted' });
+    return;
+  }
+  const balance = Number(acc.balance) || 0;
+  if (Math.abs(balance) > 0.005) {
+    res.status(400).json({ error: 'Account balance must be zero before deleting' });
+    return;
+  }
+  await db.deleteAccount(id);
+  res.json({ ok: true });
+});
+
 erpRouter.get('/customers', async (req, res) => {
   const user = (req as any).user;
   const rows = await db.getCustomers(user.productId);
@@ -178,6 +253,7 @@ erpRouter.get('/wallets', async (req, res) => {
     ledgerAccountId: w.ledger_account_id,
     pgs: JSON.parse(w.pgs),
     storeId: w.store_id || undefined,
+    walletKind: w.wallet_kind === 'receivable' ? 'receivable' : 'payment',
   })));
 });
 
@@ -191,7 +267,7 @@ erpRouter.post('/wallets', async (req, res) => {
     res.status(403).json({ error: 'Not allowed' });
     return;
   }
-  const { name, pgName, charges, storeId, openingBalance } = req.body;
+  const { name, pgName, charges, storeId, openingBalance, walletKind } = req.body;
   if (!name?.trim()) {
     res.status(400).json({ error: 'Wallet name required' });
     return;
@@ -223,12 +299,14 @@ erpRouter.post('/wallets', async (req, res) => {
     balance: 0,
     store_id: resolvedStoreId,
   });
+  const resolvedKind = walletKind === 'receivable' ? 'receivable' : 'payment';
   await db.addWallet({
     id: walletId,
     name: name.trim(),
     ledger_account_id: ledgerId,
     pgs: JSON.stringify(pgs),
     store_id: resolvedStoreId,
+    wallet_kind: resolvedKind,
   });
   if (opening > 0.005) {
     const txnId = uuid();
@@ -254,22 +332,33 @@ erpRouter.post('/wallets', async (req, res) => {
     ledgerAccountId: ledgerId,
     pgs,
     storeId: resolvedStoreId || undefined,
+    walletKind: resolvedKind,
   });
 });
 
 erpRouter.put('/wallets/:id', async (req, res) => {
   const user = (req as any).user;
   const { id } = req.params;
-  const { name } = req.body;
+  const { name, walletKind } = req.body;
   const w = await db.getWallet(id);
   if (!w) {
     res.status(404).json({ error: 'Wallet not found' });
     return;
   }
   if (!assertCanWriteWallet(user, w, res)) return;
-  if (name !== undefined) await db.updateWallet(id, { name: name.trim() });
+  const updates: Record<string, unknown> = {};
+  if (name !== undefined) updates.name = name.trim();
+  if (walletKind === 'receivable' || walletKind === 'payment') updates.wallet_kind = walletKind;
+  if (Object.keys(updates).length > 0) await db.updateWallet(id, updates);
   const updated = await db.getWallet(id);
-  res.json({ id: updated!.id, name: updated!.name, ledgerAccountId: updated!.ledger_account_id, pgs: typeof updated!.pgs === 'string' ? JSON.parse(updated!.pgs) : updated!.pgs, storeId: updated!.store_id || undefined });
+  res.json({
+    id: updated!.id,
+    name: updated!.name,
+    ledgerAccountId: updated!.ledger_account_id,
+    pgs: typeof updated!.pgs === 'string' ? JSON.parse(updated!.pgs) : updated!.pgs,
+    storeId: updated!.store_id || undefined,
+    walletKind: updated!.wallet_kind === 'receivable' ? 'receivable' : 'payment',
+  });
 });
 
 erpRouter.delete('/wallets/:id', async (req, res) => {

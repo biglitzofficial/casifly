@@ -79,12 +79,16 @@ export interface PGConfig {
   charges: Rates;
 }
 
+/** `payment` = PG swipe wallets; `receivable` = office/field wallets shown under Receivables (e.g. Prakash OFC). */
+export type WalletKind = 'payment' | 'receivable';
+
 export interface Wallet {
   id: string;
   name: string;
   ledgerAccountId: string;
   pgs: PGConfig[];
   storeId?: string; // undefined = global (all stores), set = store-specific
+  walletKind?: WalletKind;
 }
 
 export interface LedgerEntry {
@@ -160,6 +164,7 @@ export interface CreateWalletDTO {
   storeId?: string; // undefined = global, set = store-specific
   /** One-time opening: Dr wallet ledger / Cr retained earnings (Q002). Ignored if ≤ 0. */
   openingBalance?: number;
+  walletKind?: WalletKind;
 }
 
 export interface BalanceSheet {

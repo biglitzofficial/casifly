@@ -89,6 +89,14 @@ export const api = {
     return fetchApi<unknown>('/erp/accounts', { method: 'POST', body: JSON.stringify(body) });
   },
 
+  async updateAccount(id: string, body: { name: string }) {
+    return fetchApi<unknown>(`/erp/accounts/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  },
+
+  async deleteAccount(id: string) {
+    return fetchApi<{ ok: boolean }>(`/erp/accounts/${id}`, { method: 'DELETE' });
+  },
+
   async getCustomers() {
     return fetchApi<unknown[]>('/erp/customers');
   },
@@ -109,11 +117,11 @@ export const api = {
     return fetchApi<unknown[]>('/erp/wallets');
   },
 
-  async addWallet(body: { name: string; pgName?: string; charges?: Rates; storeId?: string; openingBalance?: number }) {
+  async addWallet(body: { name: string; pgName?: string; charges?: Rates; storeId?: string; openingBalance?: number; walletKind?: string }) {
     return fetchApi<unknown>('/erp/wallets', { method: 'POST', body: JSON.stringify(body) });
   },
 
-  async updateWallet(id: string, body: { name?: string }) {
+  async updateWallet(id: string, body: { name?: string; walletKind?: string }) {
     return fetchApi<unknown>(`/erp/wallets/${id}`, { method: 'PUT', body: JSON.stringify(body) });
   },
 

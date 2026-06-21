@@ -6,11 +6,13 @@ import { Layout } from '../components/Layout';
 import { Card, CardHeader, CardContent, Input, Button, Select } from '../components/ui/Elements';
 import { PageFilters } from '../components/ui/PageFilters';
 import { Plus, Save, Activity, Users, Wallet as WalletIcon, Edit2, X, List, LayoutGrid, Trash2, Download, Upload, Building2, Landmark } from 'lucide-react';
-import { CreateCustomerDTO, PGConfig, Rates, Wallet, Account, AccountType, ProfitAndLoss, Transaction, TransactionType } from '../types';
+import { CreateCustomerDTO, PGConfig, Rates, Wallet, Account, AccountType, ProfitAndLoss, Transaction, TransactionType, WalletKind } from '../types';
 import { formatCurrency, safeParseFloat, roundCurrency } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
 import { INITIAL_ACCOUNTS } from '../constants';
 import { buildTransferExpensePerInflowId, isSwipePayInflow, parseSwipeInflowEconomics } from '../lib/swipeTxnEconomics';
+import { isReceivableWallet } from '../lib/receivablesPayables';
+import { canDeleteBankCashAccount } from '../lib/chartOfAccounts';
 
 type Tab = 'reconcile' | 'customers' | 'wallets' | 'banks' | 'data';
 
@@ -400,9 +402,10 @@ const DataBackupView = () => {
 };
 
 const BanksCashView = () => {
-  const { accounts, wallets, addAccount, postTransaction, getAccountBalance, formatCurrency } = useERP();
+  const { accounts, wallets, transactions, addAccount, updateAccount, deleteAccount, postTransaction, getAccountBalance, formatCurrency } = useERP();
   const { user } = useAuth();
   const toast = useToast();
+  const { confirm } = useConfirm();
   const canCreateAccounts = user?.role === 'master_admin' || user?.role === 'product_admin';
 
   const [newBankName, setNewBankName] = useState('');
@@ -411,6 +414,9 @@ const BanksCashView = () => {
   const [addMoneyAmount, setAddMoneyAmount] = useState('');
   const [addMoneySource, setAddMoneySource] = useState('Q001');
   const [addMoneyError, setAddMoneyError] = useState('');
+  const [editingAccount, setEditingAccount] = useState<{ id: string; category: string } | null>(null);
+  const [editAccountName, setEditAccountName] = useState('');
+  const [editAccountError, setEditAccountError] = useState('');
 
   const bankAccounts = accounts.filter(a => a.category === 'Bank');
   const cashAccounts = accounts.filter(a => a.category === 'Cash');
@@ -474,6 +480,47 @@ const BanksCashView = () => {
     setAddMoneyAmount('');
     setAddMoneySource('Q001');
     toast.success(`₹${amt.toLocaleString('en-IN')} added to ${targetLabel}`);
+  };
+
+  const openEditAccount = (id: string, category: string, currentName: string) => {
+    setEditingAccount({ id, category });
+    setEditAccountName(currentName);
+    setEditAccountError('');
+  };
+
+  const handleSaveAccountName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAccount) return;
+    const name = editAccountName.trim();
+    if (!name) {
+      setEditAccountError('Name is required');
+      return;
+    }
+    if (name.length < 2) {
+      setEditAccountError('Name must be at least 2 characters');
+      return;
+    }
+    await updateAccount(editingAccount.id, { name });
+    setEditingAccount(null);
+    toast.success(`${editingAccount.category} renamed`);
+  };
+
+  const handleDeleteAccount = async (id: string, displayName: string, category: string) => {
+    const balance = getAccountBalance(id);
+    const check = canDeleteBankCashAccount(id, balance, transactions);
+    if (!check.ok) {
+      toast.error(check.reason || 'Cannot delete');
+      return;
+    }
+    const ok = await confirm({
+      title: `Delete ${category.toLowerCase()} account`,
+      message: `Permanently delete "${displayName}"? This cannot be undone.`,
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    await deleteAccount(id);
+    toast.success(`"${displayName}" deleted`);
   };
 
   return (
@@ -558,19 +605,86 @@ const BanksCashView = () => {
       </Card>
 
       <Card>
-        <CardHeader title="Current Balances" subtitle="Store-scoped: balances reflect only transactions for your store" />
+        <CardHeader title="Current Balances" subtitle="Store-scoped: balances reflect only transactions for your store. Bank and cash rows can be edited or deleted by store admin." />
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {targetOptions.map(o => (
-              <div key={o.id} className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700">
-                <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">{o.category}</p>
-                <p className="font-semibold text-slate-800 dark:text-slate-200">{o.name.split(' (')[0]}</p>
-                <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">{formatCurrency(getAccountBalance(o.id))}</p>
-              </div>
-            ))}
+            {targetOptions.map(o => {
+              const displayName = o.name.split(' (')[0];
+              const isBankOrCash = o.category === 'Bank' || o.category === 'Cash';
+              const deleteCheck = isBankOrCash
+                ? canDeleteBankCashAccount(o.id, getAccountBalance(o.id), transactions)
+                : { ok: false };
+              return (
+                <div key={o.id} className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 relative">
+                  {canCreateAccounts && isBankOrCash && (
+                    <div className="absolute top-3 right-3 flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => openEditAccount(o.id, o.category, displayName)}
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors"
+                        title={`Edit ${o.category.toLowerCase()} name`}
+                        aria-label={`Edit ${displayName}`}
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAccount(o.id, displayName, o.category)}
+                        disabled={!deleteCheck.ok}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          deleteCheck.ok
+                            ? 'text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                            : 'text-slate-300 cursor-not-allowed dark:text-slate-600'
+                        }`}
+                        title={deleteCheck.ok ? `Delete ${displayName}` : deleteCheck.reason}
+                        aria-label={`Delete ${displayName}`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase pr-16">{o.category}</p>
+                  <p className="font-semibold text-slate-800 dark:text-slate-200 pr-12">{displayName}</p>
+                  <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">{formatCurrency(getAccountBalance(o.id))}</p>
+                </div>
+              );
+            })}
           </div>
         </CardContent>
       </Card>
+
+      {editingAccount && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader
+              title={`Edit ${editingAccount.category} name`}
+              action={
+                <Button variant="outline" size="sm" onClick={() => setEditingAccount(null)}>
+                  <X size={16} />
+                </Button>
+              }
+            />
+            <CardContent>
+              <form onSubmit={handleSaveAccountName} className="space-y-4">
+                <Input
+                  label="Account name"
+                  value={editAccountName}
+                  onChange={(e) => {
+                    setEditAccountName(e.target.value);
+                    setEditAccountError('');
+                  }}
+                  error={editAccountError}
+                  placeholder="e.g. HDFC Bank Main"
+                  autoFocus
+                />
+                <Button type="submit" className="w-full">
+                  Save name
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };
@@ -952,10 +1066,12 @@ const WalletsView = () => {
   const [editingPG, setEditingPG] = useState<{ walletId: string, pgName: string | null } | null>(null);
   const [search, setSearch] = useState('');
   const [editWalletName, setEditWalletName] = useState('');
+  const [editWalletKind, setEditWalletKind] = useState<WalletKind>('payment');
   const [editWalletError, setEditWalletError] = useState('');
   const [openingExtraAmount, setOpeningExtraAmount] = useState('');
   const [showAddWallet, setShowAddWallet] = useState(false);
   const [newWalletName, setNewWalletName] = useState('');
+  const [newWalletKind, setNewWalletKind] = useState<WalletKind>('payment');
   const [newWalletPgName, setNewWalletPgName] = useState('Default PG');
   const [newWalletOpening, setNewWalletOpening] = useState('');
   const [newWalletErrors, setNewWalletErrors] = useState<Record<string, string>>({});
@@ -986,12 +1102,14 @@ const WalletsView = () => {
     if (!canMutateWallet(w)) return;
     setEditingId(w.id);
     setEditWalletName(w.name);
+    setEditWalletKind(w.walletKind ?? (isReceivableWallet(w) ? 'receivable' : 'payment'));
     setEditWalletError('');
     setOpeningExtraAmount('');
   };
 
   const resetAddWalletForm = () => {
     setNewWalletName('');
+    setNewWalletKind('payment');
     setNewWalletPgName('Default PG');
     setNewWalletOpening('');
     setNewWalletErrors({});
@@ -1016,6 +1134,7 @@ const WalletsView = () => {
       charges: { ...NEW_WALLET_PG_RATES },
       storeId: user.productId,
       openingBalance: newWalletOpening.trim() === '' ? 0 : o,
+      walletKind: newWalletKind,
     });
     resetAddWalletForm();
     toast.success('Wallet created');
@@ -1028,7 +1147,7 @@ const WalletsView = () => {
     if (!name) { setEditWalletError('Wallet name is required'); return; }
     if (name.length < 2) { setEditWalletError('Name must be at least 2 characters'); return; }
     setEditWalletError('');
-    updateWallet(editingId, { name });
+    updateWallet(editingId, { name, walletKind: editWalletKind });
     setEditingId(null);
   };
 
@@ -1179,6 +1298,17 @@ const WalletsView = () => {
                   error={newWalletErrors.opening}
                   placeholder="0 — optional"
                 />
+                <label className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-600 px-4 py-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={newWalletKind === 'receivable'}
+                    onChange={(e) => setNewWalletKind(e.target.checked ? 'receivable' : 'payment')}
+                  />
+                  <span className="text-sm text-slate-700 dark:text-slate-300">
+                    <strong>Receivables wallet</strong> (office / field — e.g. Prakash OFC). Shows under Reports → Receivables, not payment wallets.
+                  </span>
+                </label>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Opening balance books <strong>Dr</strong> this wallet / <strong>Cr</strong> Retained earnings (Q002). Default MDR % for the first PG are Visa 1.2%, Master 1.2%, Amex 2.5%, Rupay 0.5% — edit under Payment Gateways after save.
                 </p>
@@ -1229,7 +1359,18 @@ const WalletsView = () => {
             <CardContent>
               <form onSubmit={handleWalletNameSave} className="space-y-4">
                 <Input label="Wallet Name" value={editWalletName} onChange={e => { setEditWalletName(e.target.value); setEditWalletError(''); }} error={editWalletError} placeholder="Wallet name" />
-                <Button type="submit" className="w-full">Save name</Button>
+                <label className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-600 px-4 py-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={editWalletKind === 'receivable'}
+                    onChange={(e) => setEditWalletKind(e.target.checked ? 'receivable' : 'payment')}
+                  />
+                  <span className="text-sm text-slate-700 dark:text-slate-300">
+                    <strong>Receivables wallet</strong> — counts in Total Receivables (Reports / Dashboard). Names with OFC or office auto-detect if unset.
+                  </span>
+                </label>
+                <Button type="submit" className="w-full">Save wallet</Button>
               </form>
               {(() => {
                 const ew = wallets.find((x) => x.id === editingId);

@@ -90,14 +90,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, storeUse
       <div className="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950" />
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(99,102,241,0.08)_0%,transparent_50%,transparent_100%)]" />
       
-      <div className="relative h-20 flex items-center justify-between px-6 border-b border-white/5 shrink-0">
-        <div className="flex items-center min-w-0">
-          <span
-            className="text-[1.35rem] font-extrabold uppercase tracking-[0.28em] pl-0.5 bg-gradient-to-r from-indigo-200 via-white to-violet-200 bg-clip-text text-transparent select-none"
-            style={{ fontFamily: "'Plus Jakarta Sans', Inter, system-ui, sans-serif" }}
-          >
-            CASIFLY
-          </span>
+      <div className="relative h-20 flex items-center justify-between px-5 border-b border-white/5 shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <img
+            src="/logo.png"
+            alt="CASIFLY"
+            className="h-11 w-auto object-contain shrink-0 drop-shadow-[0_2px_8px_rgba(0,0,0,0.35)]"
+          />
+          <span className="text-lg font-bold text-white tracking-tight truncate">CASIFLY</span>
         </div>
         <button onClick={onMobileToggle} className="md:hidden p-2 -mr-2 text-slate-400 hover:text-white" aria-label="Close menu">
           <X size={24} />
