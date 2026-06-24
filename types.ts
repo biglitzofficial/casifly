@@ -120,6 +120,12 @@ export interface TransactionMetadata {
   mediatorRemarks?: string;
   storeId?: string; // Product/store id for analytics
   performedByUserId?: string; // Staff who executed the transaction (for analytics)
+  /** Receipt or payment voucher posted from Vouchers page. */
+  voucherType?: 'receipt' | 'payment';
+  voucherNo?: string;
+  /** Party / payee name shown on printed voucher. */
+  voucherParty?: string;
+  voucherRemarks?: string;
 }
 
 export interface StaffTarget {

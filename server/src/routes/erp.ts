@@ -244,6 +244,12 @@ erpRouter.delete('/customers/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+function mapWalletKind(raw: unknown): 'receivable' | 'payment' | undefined {
+  if (raw === 'receivable') return 'receivable';
+  if (raw === 'payment') return 'payment';
+  return undefined;
+}
+
 erpRouter.get('/wallets', async (req, res) => {
   const user = (req as any).user;
   const rows = await db.getWallets(user.productId);
@@ -253,7 +259,7 @@ erpRouter.get('/wallets', async (req, res) => {
     ledgerAccountId: w.ledger_account_id,
     pgs: JSON.parse(w.pgs),
     storeId: w.store_id || undefined,
-    walletKind: w.wallet_kind === 'receivable' ? 'receivable' : 'payment',
+    walletKind: mapWalletKind(w.wallet_kind),
   })));
 });
 
@@ -357,7 +363,7 @@ erpRouter.put('/wallets/:id', async (req, res) => {
     ledgerAccountId: updated!.ledger_account_id,
     pgs: typeof updated!.pgs === 'string' ? JSON.parse(updated!.pgs) : updated!.pgs,
     storeId: updated!.store_id || undefined,
-    walletKind: updated!.wallet_kind === 'receivable' ? 'receivable' : 'payment',
+    walletKind: mapWalletKind(updated!.wallet_kind),
   });
 });
 

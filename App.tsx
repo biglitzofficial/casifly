@@ -5,6 +5,7 @@ import { Dashboard } from './pages/Dashboard';
 import { SwipePay } from './pages/SwipePay';
 import { PaySwipe } from './pages/PaySwipe';
 import { MoneyTransfer } from './pages/MoneyTransfer';
+import { Vouchers } from './pages/Vouchers';
 import { Ledgers } from './pages/Ledgers';
 import { Reports } from './pages/Reports';
 import { Masters } from './pages/Masters';
@@ -23,7 +24,7 @@ import { ConfirmProvider } from './context/ConfirmContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 
-const views = ['dashboard','profile','staff','staff-analytics','swipe-pay','pay-swipe','money-transfer','crm','ledgers','reports','masters'];
+const views = ['dashboard','profile','staff','staff-analytics','swipe-pay','pay-swipe','money-transfer','vouchers','crm','ledgers','reports','masters'];
 const landingHashes = ['home', 'store-login', 'distributor-login'] as const;
 const VIEW_STORAGE_KEY = 'casifly_view';
 
@@ -175,6 +176,7 @@ const AppContent: React.FC = () => {
       case 'swipe-pay': return <SwipePay />;
       case 'pay-swipe': return <PaySwipe />;
       case 'money-transfer': return <MoneyTransfer />;
+      case 'vouchers': return <Vouchers />;
       case 'crm': return <CRM />;
       case 'ledgers': return <Ledgers />;
       case 'reports': return <Reports />;

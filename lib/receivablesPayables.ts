@@ -27,8 +27,9 @@ export type ReceivablesPayablesSummary = {
 /** Payment gateway wallets vs office / field receivable wallets (e.g. Prakash OFC). */
 export function isReceivableWallet(w: Wallet): boolean {
   if (w.walletKind === 'receivable') return true;
-  if (w.walletKind === 'payment') return false;
-  return /\b(ofc|office|receivable)\b/i.test(w.name);
+  const officeName = /(?:\bofc\b|\boffice\b|\breceivable\b|ofc)/i.test(w.name);
+  if (w.walletKind === 'payment') return officeName;
+  return officeName;
 }
 
 export function buildReceivablesPayablesSummary(
@@ -60,7 +61,21 @@ export function buildReceivablesPayablesSummary(
       id: w.id,
       label: w.name,
       amount: bal,
-      detail: 'Office / receivable wallet',
+      detail: 'Office / receivable wallet (e.g. Prakash OFC)',
+    });
+  }
+
+  const walletLedgerIds = new Set(wallets.map((w) => w.ledgerAccountId));
+  for (const a of accounts) {
+    if (a.category !== 'Wallet' || walletLedgerIds.has(a.id)) continue;
+    if (!/(?:\bofc\b|\boffice\b|\breceivable\b|ofc)/i.test(a.name)) continue;
+    const bal = roundCurrency(getAccountBalance(a.id));
+    if (bal < 0.005) continue;
+    receivables.push({
+      id: a.id,
+      label: a.name,
+      amount: bal,
+      detail: 'Office / receivable wallet ledger',
     });
   }
 

@@ -15,7 +15,7 @@ const TXN_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: TransactionType.SWIPE_PAY, label: 'Swipe & Pay' },
   { value: TransactionType.PAY_SWIPE, label: 'Pay & Swipe' },
   { value: TransactionType.MONEY_TRANSFER, label: 'Money Transfer' },
-  { value: TransactionType.JOURNAL, label: 'Journal' },
+  { value: TransactionType.JOURNAL, label: 'Journal / Voucher' },
   { value: TransactionType.RECONCILIATION, label: 'Reconciliation' },
 ];
 
