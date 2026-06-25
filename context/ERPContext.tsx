@@ -6,7 +6,8 @@ import {
 } from '../types';
 import { INITIAL_ACCOUNTS, INITIAL_CUSTOMERS, INITIAL_WALLETS } from '../constants';
 import { formatCurrency, generateId, roundCurrency, txnOnOrBeforeLocalDay, normalizeLedgerEntries } from '../lib/utils';
-import { deferredSwipePortalExpenseExcludedFromPl, totalSwipeFranchiseOtherValue } from '../lib/swipeTxnEconomics';
+import { deferredSwipePortalExpenseExcludedFromPl, totalSwipeInflowNetProfitWorkbook } from '../lib/swipeTxnEconomics';
+import { totalPaySwipeRecoveryNetMargin } from '../lib/paySwipeTxnReport';
 import { useToast } from './ToastContext';
 import { useAuth } from './AuthContext';
 import { api, USE_API } from '../lib/api';
@@ -695,14 +696,22 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         if (a.id === 'E001' && deferredSwipePortal > 0.005) {
           balance = roundCurrency(Math.max(0, balance - deferredSwipePortal));
         }
+        /** Mediator payout is pass-through (see Payables) — not your operating expense. */
+        if (a.id === 'E004') {
+          balance = 0;
+        }
         return { account: a, balance };
       });
 
     const totalIncome = income.reduce((sum, item) => sum + item.balance, 0);
     const totalExpenses = expenses.reduce((sum, item) => sum + item.balance, 0);
     const completed = transactionsForUser.filter(t => t.status === 'COMPLETED');
-    const franchiseOther = totalSwipeFranchiseOtherValue(completed);
-    const netProfit = roundCurrency(totalIncome - totalExpenses - franchiseOther);
+    const swipeNet = totalSwipeInflowNetProfitWorkbook(completed);
+    const paySwipeNet = totalPaySwipeRecoveryNetMargin(completed);
+    const i002 = getAccountBalance('I002');
+    const e002 = getAccountBalance('E002');
+    const e003 = getAccountBalance('E003');
+    const netProfit = roundCurrency(swipeNet + paySwipeNet + i002 - e002 - e003);
     const totalExpensesLedger = accounts
       .filter(a => a.type === AccountType.EXPENSE)
       .reduce((sum, a) => sum + getAccountBalance(a.id), 0);

@@ -120,3 +120,19 @@ export function buildReceivablesPayablesSummary(
 
   return { receivables, payables, totalReceivables, totalPayables };
 }
+
+/** Short labels for dashboard / summary chips. */
+export function receivableLineShortLabel(line: RpLine): string {
+  if (line.id === 'A006') return 'Pay & Swipe (A006)';
+  return line.label;
+}
+
+export function formatReceivablesSubtitle(
+  summary: ReceivablesPayablesSummary,
+  formatCurrency: (n: number) => string
+): string {
+  if (summary.receivables.length === 0) return 'No receivables on books';
+  return summary.receivables
+    .map((r) => `${receivableLineShortLabel(r)} ${formatCurrency(r.amount)}`)
+    .join(' · ');
+}

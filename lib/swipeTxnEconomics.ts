@@ -326,7 +326,34 @@ export function totalSwipeFranchiseOtherValue(transactions: Transaction[]): numb
   return roundCurrency(sum);
 }
 
-/** Mediator / franchise payouts (E004) linked to a swipe inflow. */
+/** E004 mediator payouts — pass-through, not operating expense for workbook net profit. */
+export function mediatorPayoutExpenseExcludedFromPl(transactions: Transaction[]): number {
+  let sum = 0;
+  for (const t of transactions) {
+    if (t.status !== 'COMPLETED') continue;
+    sum += roundCurrency(sumAcct(t.entries, 'E004', 'debit'));
+  }
+  return roundCurrency(sum);
+}
+
+/**
+ * Sum of Transaction P&L net profit rows (our margin only — excludes mediator / other value pass-through).
+ * Matches Reports → Transaction P&L (Swipe Inflow) net profit column.
+ */
+export function totalSwipeInflowNetProfitWorkbook(transactions: Transaction[]): number {
+  const transferByInflow = buildTransferExpensePerInflowId(transactions);
+  let sum = 0;
+  for (const t of transactions) {
+    if (t.status !== 'COMPLETED' || !isSwipePayInflow(t)) continue;
+    if (!isSwipeMarginRecognizedForInflow(t, transactions)) continue;
+    const econ = parseSwipeInflowEconomics(t, transactions);
+    if (!econ) continue;
+    const extra = sumSwipeExtraChargesForInflow(t.id, transactions);
+    const transferFee = transferByInflow.get(t.id) ?? 0;
+    sum += computeSwipeInflowFranchisePL(t, econ, extra, transferFee).netProfit;
+  }
+  return roundCurrency(sum);
+}
 export function sumMediatorPayoutForInflow(inflowId: string, transactions: Transaction[]): number {
   let sum = 0;
   for (const t of transactions) {

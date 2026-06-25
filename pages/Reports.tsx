@@ -161,7 +161,7 @@ export const Reports: React.FC = () => {
     txns.forEach(t => {
       t.entries.forEach(e => {
         if (e.accountId === 'I001' || e.accountId === 'I002') income += e.credit;
-        if (['E001', 'E002', 'E003', 'E004'].includes(e.accountId)) expense += e.debit;
+        if (['E001', 'E002', 'E003'].includes(e.accountId)) expense += e.debit;
       });
     });
     const deferredPortal = deferredSwipePortalExpenseInSubset(txns, filteredTransactions);
@@ -780,7 +780,7 @@ export const Reports: React.FC = () => {
               title={txnPlMode === 'swipe-inflow' ? 'Transaction P&L (Swipe Inflow)' : 'Transaction P&L (Pay & Swipe)'}
               subtitle={
                 txnPlMode === 'swipe-inflow'
-                  ? 'Customer amount = swipe × customer %; Our charges = swipe × our %; Other value = franchise gap; Mediator paid via Swipe & Pay → Mediator Payout; Net profit = our charges − app − transfer fee + extra.'
+                  ? 'Customer amount = swipe × customer %; Our charges = swipe × our %; Other value = franchise gap (mediator share — separate column, not deducted from net profit); Mediator paid via Swipe & Pay → Mediator Payout; Net profit = our charges − app − transfer fee + extra only.'
                   : 'Advance = customer receivable (A006) funded from bank/cash/wallet. Recovery = swipe clears receivable, MDR to E001, net to wallet, charges collected to I001. Net margin = charges collected − MDR (recovery rows).'
               }
               action={<Button size="sm" variant="outline" onClick={exportTxnPL}><Download size={14} /> Export CSV</Button>}

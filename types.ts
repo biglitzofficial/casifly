@@ -187,7 +187,7 @@ export interface ProfitAndLoss {
   expenses: { account: Account; balance: number }[];
   totalIncome: number;
   totalExpenses: number;
-  /** Workbook-style: deferred swipe portal excluded; franchise other value (pass-through) excluded from net. */
+  /** Workbook-style: swipe inflow net + pay-swipe recovery margin; mediator E004 pass-through excluded. */
   netProfit: number;
   /** Raw ledger income − expenses; retained earnings adjustment on balance sheet so A = L + E. */
   netProfitLedger: number;

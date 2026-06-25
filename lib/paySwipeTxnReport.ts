@@ -175,3 +175,15 @@ export function buildPaySwipePLRows(
   }
   return rows;
 }
+
+/** Pay & Swipe recovery net margin (charges collected − MDR) for workbook P&L. */
+export function totalPaySwipeRecoveryNetMargin(transactions: Transaction[]): number {
+  let sum = 0;
+  for (const t of transactions) {
+    if (!isPaySwipeRecovery(t)) continue;
+    const charges = roundCurrency(sumAcct(t.entries, 'I001', 'credit'));
+    const mdr = roundCurrency(sumAcct(t.entries, 'E001', 'debit'));
+    sum += roundCurrency(charges - mdr);
+  }
+  return roundCurrency(sum);
+}

@@ -8,7 +8,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { CreateCustomerDTO, Rates } from '../types';
 import { safeParseFloat } from '../lib/utils';
 import { DEFAULT_COMMISSION_RATES } from '../constants';
-import { buildReceivablesPayablesSummary } from '../lib/receivablesPayables';
+import { buildReceivablesPayablesSummary, formatReceivablesSubtitle } from '../lib/receivablesPayables';
 
 const toRateStrings = (r: Rates) => ({ visa: String(r.visa), master: String(r.master), amex: String(r.amex), rupay: String(r.rupay) });
 
@@ -126,7 +126,7 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
           icon={<Sparkles className="w-6 h-6 text-amber-600" />} 
           trend="+12%" 
           color="amber"
-          subtitle="Your margin only — franchise pass-through excluded"
+          subtitle="Your margin only — mediator / franchise pass-through tracked separately"
         />
       </div>
 
@@ -137,7 +137,7 @@ export const Dashboard: React.FC<{ onNavigate?: (view: string) => void }> = ({ o
           icon={<ArrowDownLeft className="w-6 h-6 text-violet-600" />}
           trend=""
           color="violet"
-          subtitle="Pay & Swipe (A006) + office wallets"
+          subtitle={formatReceivablesSubtitle(rpSummary, formatCurrency)}
         />
         <MetricCard
           title="Total Payables"
