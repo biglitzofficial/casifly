@@ -112,8 +112,10 @@ export interface TransactionMetadata {
   relatedInflowId?: string;
   /** Swipe outflow: additional fee booked to income (added to linked inflow P&L net profit). */
   extraCharges?: number;
-  /** Swipe outflow: wallet transfer / IMPS fee (E001) — deducted from linked inflow net profit. */
+  /** Pay & Swipe advance or recovery: wallet transfer / IMPS fee (E001 on advance; attributed on recovery P&L). */
   transferFee?: number;
+  /** Pay & Swipe recovery: how customer paid you back — card swipe, cash, or bank transfer. */
+  paySwipeRecoveryMethod?: 'card' | 'cash' | 'bank';
   /** Mediator payout linked to swipe inflow (franchise / other-value share). */
   mediatorPayout?: number;
   /** Note for mediator payout (name, UTR, deal ref, etc.). */

@@ -313,16 +313,18 @@ export const Reports: React.FC = () => {
         acc.mdrCost += r.mdrCost;
         acc.netToWallet += r.netToWallet;
         acc.chargesCollected += r.chargesCollected;
+        acc.transferFee += r.transferFee;
         acc.netMargin += r.netMargin;
         return acc;
       },
-      { principal: 0, mdrCost: 0, netToWallet: 0, chargesCollected: 0, netMargin: 0 }
+      { principal: 0, mdrCost: 0, netToWallet: 0, chargesCollected: 0, transferFee: 0, netMargin: 0 }
     );
     return {
       principal: roundCurrency(sums.principal),
       mdrCost: roundCurrency(sums.mdrCost),
       netToWallet: roundCurrency(sums.netToWallet),
       chargesCollected: roundCurrency(sums.chargesCollected),
+      transferFee: roundCurrency(sums.transferFee),
       netMargin: roundCurrency(sums.netMargin),
     };
   }, [paySwipeTxnPL]);
@@ -362,7 +364,7 @@ export const Reports: React.FC = () => {
     if (txnPlMode === 'pay-swipe') {
       const headers = [
         '#', 'Date', 'Lead', 'Customer', 'Type', 'Wallet', 'Card', 'Principal', 'MDR', 'Net to wallet',
-        'Charges collected', 'Collected / paid from', 'Net margin', 'Remarks',
+        'Charges collected', 'Transfer fee', 'Collected / paid from', 'Net margin', 'Remarks',
       ];
       const rows = paySwipeTxnPL.map((r, i) => [
         String(i + 1),
@@ -376,6 +378,7 @@ export const Reports: React.FC = () => {
         formatCurrency(r.mdrCost),
         formatCurrency(r.netToWallet),
         formatCurrency(r.chargesCollected),
+        formatCurrency(r.transferFee),
         r.counterpartyAccount,
         formatCurrency(r.netMargin),
         r.remarks,
@@ -781,7 +784,7 @@ export const Reports: React.FC = () => {
               subtitle={
                 txnPlMode === 'swipe-inflow'
                   ? 'Customer amount = swipe × customer %; Our charges = swipe × our %; Other value = franchise gap (mediator share — separate column, not deducted from net profit); Mediator paid via Swipe & Pay → Mediator Payout; Net profit = our charges − app − transfer fee + extra only.'
-                  : 'Advance = customer receivable (A006) funded from bank/cash/wallet. Recovery = swipe clears receivable, MDR to E001, net to wallet, charges collected to I001. Net margin = charges collected − MDR (recovery rows).'
+                  : 'Advance = customer receivable (A006) + optional wallet transfer fee (E001). Recovery = swipe clears receivable, MDR to E001, net to wallet, charges to I001. Net margin = charges collected − MDR − transfer fee (recovery rows; fee from linked advance).'
               }
               action={<Button size="sm" variant="outline" onClick={exportTxnPL}><Download size={14} /> Export CSV</Button>}
             />
@@ -861,9 +864,9 @@ export const Reports: React.FC = () => {
             />
             ) : (
             <DataTable
-              minTableWidth={TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? 1560 : 1520}
+              minTableWidth={TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? 1680 : 1640}
               headers={[
-                '#', 'Date', 'Lead', 'Customer', 'Type', 'Wallet', 'Card', 'Principal', 'MDR', 'Net to wlt', 'Charges coll.', 'From / into', 'Net margin', 'Remarks',
+                '#', 'Date', 'Lead', 'Customer', 'Type', 'Wallet', 'Card', 'Principal', 'MDR', 'Net to wlt', 'Charges coll.', 'Xfer fee', 'From / into', 'Net margin', 'Remarks',
                 ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? ['Edit'] : []),
               ]}
               rows={paySwipeTxnPL.map((t, idx) => [
@@ -878,6 +881,7 @@ export const Reports: React.FC = () => {
                 formatCurrency(t.mdrCost),
                 formatCurrency(t.netToWallet),
                 formatCurrency(t.chargesCollected),
+                formatCurrency(t.transferFee),
                 <span className="whitespace-nowrap text-slate-700">{t.counterpartyAccount}</span>,
                 <span className={`font-bold ${t.netMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(t.netMargin)}</span>,
                 <span className="max-w-[10rem] truncate block text-xs text-slate-600" title={t.raw.description}>{t.remarks}</span>,
@@ -906,6 +910,7 @@ export const Reports: React.FC = () => {
                 formatCurrency(paySwipeTxnPLTotals.mdrCost),
                 formatCurrency(paySwipeTxnPLTotals.netToWallet),
                 formatCurrency(paySwipeTxnPLTotals.chargesCollected),
+                formatCurrency(paySwipeTxnPLTotals.transferFee),
                 '',
                 <span className={`font-bold ${paySwipeTxnPLTotals.netMargin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                   {formatCurrency(paySwipeTxnPLTotals.netMargin)}
@@ -913,7 +918,7 @@ export const Reports: React.FC = () => {
                 '',
                 ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? [''] : []),
               ]}
-              rightAlignColumns={[7, 8, 9, 10, 11, 12]}
+              rightAlignColumns={[7, 8, 9, 10, 11, 12, 13]}
             />
             )}
           </Card>

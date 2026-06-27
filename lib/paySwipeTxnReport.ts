@@ -15,6 +15,151 @@ export function isPaySwipeRecovery(t: Transaction): boolean {
   return t.type === TransactionType.PAY_SWIPE && t.status === 'COMPLETED' && /^Recovery:/i.test(t.description.trim());
 }
 
+export function paySwipeRecoveryMethod(t: Transaction): 'card' | 'cash' | 'bank' {
+  const m = t.metadata?.paySwipeRecoveryMethod;
+  if (m === 'cash' || m === 'bank' || m === 'card') return m;
+  if (/\(CASH\)/i.test(t.description)) return 'cash';
+  if (/\(BANK\)/i.test(t.description)) return 'bank';
+  return 'card';
+}
+
+/** Wallet / IMPS transfer fee on Pay Advance (E001 or metadata). */
+export function transferFeeFromPaySwipeAdvance(t: Transaction): number {
+  const meta = Number(t.metadata?.transferFee);
+  if (Number.isFinite(meta) && meta > 0.005) return roundCurrency(meta);
+  if (!isPaySwipeAdvance(t)) return 0;
+  return roundCurrency(sumAcct(t.entries, 'E001', 'debit'));
+}
+
+type AdvanceLot = {
+  principal: number;
+  transferFee: number;
+  remainingPrincipal: number;
+};
+
+function customerPaySwipeTxnsChronological(customerId: string, transactions: Transaction[]): Transaction[] {
+  return transactions
+    .filter(
+      (t) =>
+        t.status === 'COMPLETED' &&
+        t.type === TransactionType.PAY_SWIPE &&
+        t.metadata?.customerId === customerId &&
+        (isPaySwipeAdvance(t) || isPaySwipeRecovery(t)),
+    )
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+}
+
+function buildAdvanceLotsAfterAllRecoveries(customerId: string, transactions: Transaction[]): AdvanceLot[] {
+  const lots: AdvanceLot[] = [];
+  for (const tx of customerPaySwipeTxnsChronological(customerId, transactions)) {
+    if (isPaySwipeAdvance(tx)) {
+      const principal = roundCurrency(sumAcct(tx.entries, 'A006', 'debit'));
+      lots.push({
+        principal,
+        transferFee: transferFeeFromPaySwipeAdvance(tx),
+        remainingPrincipal: principal,
+      });
+    } else if (isPaySwipeRecovery(tx)) {
+      applyRecoveryToLots(lots, roundCurrency(sumAcct(tx.entries, 'A006', 'credit')));
+    }
+  }
+  return lots;
+}
+
+function applyRecoveryToLots(lots: AdvanceLot[], recoveryPrincipal: number): void {
+  let remaining = recoveryPrincipal;
+  for (const lot of lots) {
+    if (remaining <= 0.005) break;
+    if (lot.remainingPrincipal <= 0.005) continue;
+    const take = Math.min(lot.remainingPrincipal, remaining);
+    lot.remainingPrincipal = roundCurrency(lot.remainingPrincipal - take);
+    remaining = roundCurrency(remaining - take);
+  }
+}
+
+function transferFeeFromLots(lots: AdvanceLot[], recoveryPrincipal: number): number {
+  if (recoveryPrincipal <= 0.005) return 0;
+  let remaining = recoveryPrincipal;
+  let feeSum = 0;
+  for (const lot of lots) {
+    if (remaining <= 0.005) break;
+    if (lot.remainingPrincipal <= 0.005) continue;
+    const take = Math.min(lot.remainingPrincipal, remaining);
+    const feePart =
+      lot.principal > 0.005 ? roundCurrency(lot.transferFee * (take / lot.principal)) : 0;
+    feeSum = roundCurrency(feeSum + feePart);
+    lot.remainingPrincipal = roundCurrency(lot.remainingPrincipal - take);
+    remaining = roundCurrency(remaining - take);
+  }
+  return roundCurrency(feeSum);
+}
+
+function lotsBeforeRecovery(
+  customerId: string,
+  transactions: Transaction[],
+  beforeRecoveryId?: string,
+): AdvanceLot[] {
+  const lots: AdvanceLot[] = [];
+  for (const tx of customerPaySwipeTxnsChronological(customerId, transactions)) {
+    if (beforeRecoveryId && tx.id === beforeRecoveryId) break;
+    if (isPaySwipeAdvance(tx)) {
+      const principal = roundCurrency(sumAcct(tx.entries, 'A006', 'debit'));
+      lots.push({
+        principal,
+        transferFee: transferFeeFromPaySwipeAdvance(tx),
+        remainingPrincipal: principal,
+      });
+    } else if (isPaySwipeRecovery(tx)) {
+      if (beforeRecoveryId && tx.id === beforeRecoveryId) break;
+      applyRecoveryToLots(lots, roundCurrency(sumAcct(tx.entries, 'A006', 'credit')));
+    }
+  }
+  return lots;
+}
+
+/** FIFO: transfer fee from open advances attributed to this recovery principal. */
+export function paySwipeRecoveryTransferFeePreview(
+  customerId: string,
+  recoveryPrincipal: number,
+  transactions: Transaction[],
+): number {
+  const lots = buildAdvanceLotsAfterAllRecoveries(customerId, transactions);
+  return transferFeeFromLots(
+    lots.map((l) => ({ ...l })),
+    recoveryPrincipal,
+  );
+}
+
+function recoveryTransferFeeAttributed(t: Transaction, transactions: Transaction[]): number {
+  const stored = Number(t.metadata?.transferFee);
+  if (Number.isFinite(stored) && stored > 0.005) return roundCurrency(stored);
+  const cid = t.metadata?.customerId;
+  if (!cid) return 0;
+  const principal = roundCurrency(sumAcct(t.entries, 'A006', 'credit'));
+  const lots = lotsBeforeRecovery(cid, transactions, t.id);
+  return transferFeeFromLots(lots, principal);
+}
+
+/** Transfer fees on advances not yet cleared by recoveries (workbook P&L). */
+export function unrecoveredPaySwipeAdvanceTransferFees(transactions: Transaction[]): number {
+  const customerIds = new Set<string>();
+  for (const t of transactions) {
+    if (t.status !== 'COMPLETED' || t.type !== TransactionType.PAY_SWIPE) continue;
+    const cid = t.metadata?.customerId;
+    if (cid && isPaySwipeAdvance(t)) customerIds.add(cid);
+  }
+  let sum = 0;
+  for (const cid of customerIds) {
+    const lots = buildAdvanceLotsAfterAllRecoveries(cid, transactions);
+    for (const lot of lots) {
+      if (lot.remainingPrincipal <= 0.005) continue;
+      const ratio = lot.principal > 0.005 ? lot.remainingPrincipal / lot.principal : 0;
+      sum = roundCurrency(sum + roundCurrency(lot.transferFee * ratio));
+    }
+  }
+  return roundCurrency(sum);
+}
+
 /** Outstanding Pay & Swipe receivable for one customer (A006): advances minus recoveries, from posted txns. */
 export function customerPaySwipeReceivableOutstanding(customerId: string, transactions: Transaction[]): number {
   let bal = 0;
@@ -45,6 +190,8 @@ export type PaySwipePLRow = {
   mdrCost: number;
   netToWallet: number;
   chargesCollected: number;
+  /** Advance: wallet transfer fee. Recovery: fee attributed from linked advance(s). */
+  transferFee: number;
   /** Recovery: collection asset name. Advance: source (bank/cash) name. */
   counterpartyAccount: string;
   netMargin: number;
@@ -63,9 +210,10 @@ function parseAdvance(
   accounts: Account[],
   customers: Customer[],
   userId?: string,
-  userName?: string
+  userName?: string,
 ): PaySwipePLRow {
   const principal = roundCurrency(sumAcct(t.entries, 'A006', 'debit'));
+  const transferFee = transferFeeFromPaySwipeAdvance(t);
   let counterpartyAccount = '—';
   for (const e of t.entries) {
     if (e.credit > 0.005 && e.accountId !== 'A006') {
@@ -89,6 +237,7 @@ function parseAdvance(
     mdrCost: 0,
     netToWallet: 0,
     chargesCollected: 0,
+    transferFee,
     counterpartyAccount,
     netMargin: 0,
     remarks: t.description.length > 48 ? `${t.description.slice(0, 48)}…` : t.description,
@@ -100,13 +249,15 @@ function parseRecovery(
   wallets: Wallet[],
   accounts: Account[],
   customers: Customer[],
+  transactions: Transaction[],
   userId?: string,
-  userName?: string
+  userName?: string,
 ): PaySwipePLRow | null {
   if (!isPaySwipeRecovery(t)) return null;
   const principal = roundCurrency(sumAcct(t.entries, 'A006', 'credit'));
   const mdrCost = roundCurrency(sumAcct(t.entries, 'E001', 'debit'));
   const chargesCollected = roundCurrency(sumAcct(t.entries, 'I001', 'credit'));
+  const transferFee = recoveryTransferFeeAttributed(t, transactions);
 
   const walletLedgerIds = new Set(wallets.map((w) => w.ledgerAccountId));
   let netToWallet = 0;
@@ -129,11 +280,15 @@ function parseRecovery(
     break;
   }
 
-  const netMargin = roundCurrency(chargesCollected - mdrCost);
+  const netMargin = roundCurrency(chargesCollected - mdrCost - transferFee);
   const cid = t.metadata?.customerId;
   const customer = customers.find((c) => c.id === cid)?.name ?? '—';
-  const cardRaw = (t.metadata?.cardType || '—').toUpperCase();
-  const cardLabel = cardRaw === 'MASTERCARD' ? 'MASTER' : cardRaw;
+  const method = paySwipeRecoveryMethod(t);
+  const cardLabel =
+    method === 'cash' ? 'CASH' : method === 'bank' ? 'BANK' : (() => {
+      const cardRaw = (t.metadata?.cardType || '—').toUpperCase();
+      return cardRaw === 'MASTERCARD' ? 'MASTER' : cardRaw;
+    })();
 
   return {
     id: t.id,
@@ -149,6 +304,7 @@ function parseRecovery(
     mdrCost,
     netToWallet,
     chargesCollected,
+    transferFee,
     counterpartyAccount,
     netMargin,
     remarks: t.description.length > 48 ? `${t.description.slice(0, 48)}…` : t.description,
@@ -161,7 +317,7 @@ export function buildPaySwipePLRows(
   accounts: Account[],
   customers: Customer[],
   userId?: string,
-  userName?: string
+  userName?: string,
 ): PaySwipePLRow[] {
   const rows: PaySwipePLRow[] = [];
   for (const t of transactions) {
@@ -169,21 +325,23 @@ export function buildPaySwipePLRows(
     if (isPaySwipeAdvance(t)) {
       rows.push(parseAdvance(t, accounts, customers, userId, userName));
     } else if (isPaySwipeRecovery(t)) {
-      const r = parseRecovery(t, wallets, accounts, customers, userId, userName);
+      const r = parseRecovery(t, wallets, accounts, customers, transactions, userId, userName);
       if (r) rows.push(r);
     }
   }
   return rows;
 }
 
-/** Pay & Swipe recovery net margin (charges collected − MDR) for workbook P&L. */
+/** Pay & Swipe workbook net margin: recovery (charges − MDR − transfer fee) minus unrecovered advance fees. */
 export function totalPaySwipeRecoveryNetMargin(transactions: Transaction[]): number {
   let sum = 0;
   for (const t of transactions) {
     if (!isPaySwipeRecovery(t)) continue;
     const charges = roundCurrency(sumAcct(t.entries, 'I001', 'credit'));
     const mdr = roundCurrency(sumAcct(t.entries, 'E001', 'debit'));
-    sum += roundCurrency(charges - mdr);
+    const transferFee = recoveryTransferFeeAttributed(t, transactions);
+    sum += roundCurrency(charges - mdr - transferFee);
   }
+  sum -= unrecoveredPaySwipeAdvanceTransferFees(transactions);
   return roundCurrency(sum);
 }

@@ -7,7 +7,7 @@ import { Card, CardContent, Input, Select, Button } from '../components/ui/Eleme
 import { safeParseFloat, roundCurrency } from '../lib/utils';
 import { ArrowRight, CheckCircle2, Search, Users } from 'lucide-react';
 import { DEFAULT_COMMISSION_RATES, INITIAL_ACCOUNTS } from '../constants';
-import { customerPaySwipeReceivableOutstanding } from '../lib/paySwipeTxnReport';
+import { customerPaySwipeReceivableOutstanding, paySwipeRecoveryTransferFeePreview } from '../lib/paySwipeTxnReport';
 import { TypedRecentTransactionsCard } from '../components/TypedRecentTransactionsCard';
 import { TransactionEditModal } from '../components/TransactionEditModal';
 import { TEMP_ALLOW_LEDGER_REPORT_PL_EDIT } from '../lib/tempUiFlags';
@@ -28,8 +28,10 @@ export const PaySwipe: React.FC = () => {
   // --- Pay Advance State ---
   const [payAmount, setPayAmount] = useState<string>('');
   const [paySourceId, setPaySourceId] = useState('A002');
+  const [advanceTransferFee, setAdvanceTransferFee] = useState<string>('0');
 
   // --- Swipe Recovery State ---
+  const [recoveryMethod, setRecoveryMethod] = useState<'card' | 'cash' | 'bank'>('card');
   const [recoveryErrors, setRecoveryErrors] = useState<Record<string, string>>({});
   const [recoveryAmount, setRecoveryAmount] = useState<string>('');
   const [swipeWalletId, setSwipeWalletId] = useState(wallets[0]?.id || '');
@@ -53,6 +55,8 @@ export const PaySwipe: React.FC = () => {
     setCustomerId(null);
     setIsNewCustomer(false);
     setPayAmount('');
+    setAdvanceTransferFee('0');
+    setRecoveryMethod('card');
     setRecoveryAmount('');
     setCollectionAmount('');
     setErrors({});
@@ -142,12 +146,36 @@ export const PaySwipe: React.FC = () => {
       });
   }, [assetDestinationAccounts]);
 
+  const cashCollectOptions = useMemo(
+    () =>
+      collectIntoOptions.filter((o) => assetDestinationAccounts.find((a) => a.id === o.value)?.category === 'Cash'),
+    [collectIntoOptions, assetDestinationAccounts],
+  );
+
+  const bankCollectOptions = useMemo(
+    () =>
+      collectIntoOptions.filter((o) => assetDestinationAccounts.find((a) => a.id === o.value)?.category === 'Bank'),
+    [collectIntoOptions, assetDestinationAccounts],
+  );
+
+  const recoveryCollectOptions =
+    recoveryMethod === 'cash' ? cashCollectOptions : recoveryMethod === 'bank' ? bankCollectOptions : collectIntoOptions;
+
   useEffect(() => {
     if (collectIntoOptions.length === 0) return;
     if (!collectIntoOptions.some((o) => o.value === collectAccount)) {
       setCollectAccount(collectIntoOptions[0].value);
     }
   }, [collectIntoOptions, collectAccount]);
+
+  useEffect(() => {
+    if (mode !== 'recovery') return;
+    if (recoveryMethod === 'cash' && cashCollectOptions.length > 0) {
+      setCollectAccount(cashCollectOptions[0].value);
+    } else if (recoveryMethod === 'bank' && bankCollectOptions.length > 0) {
+      setCollectAccount(bankCollectOptions[0].value);
+    }
+  }, [recoveryMethod, mode, cashCollectOptions, bankCollectOptions]);
 
   // Auto-set initial PG
   useEffect(() => {
@@ -156,29 +184,38 @@ export const PaySwipe: React.FC = () => {
     }
   }, [swipeWalletId, selectedWallet]);
 
-  // Sync Commission Rate input when Card Type changes
+  // Sync Commission Rate input when Card Type changes (card swipe only)
   useEffect(() => {
+    if (mode !== 'recovery' || recoveryMethod !== 'card') return;
     // @ts-ignore
     const rate = commissionRates[cardType] || 0;
     setCurrentCommRate(rate.toString());
-  }, [cardType, commissionRates]);
+  }, [cardType, commissionRates, mode, recoveryMethod]);
 
-  // Sync MDR % from PG when wallet/pg/card changes; auto-calc collection for both advance & recovery
+  // Sync MDR % from PG when wallet/pg/card changes (card swipe only)
   useEffect(() => {
+    if (mode !== 'recovery' || recoveryMethod !== 'card') return;
     if (selectedWallet && selectedPG && cardType) {
       // @ts-ignore
       const mdr = selectedPG.charges[cardType] || 0;
       setAppliedMdrPercent(mdr.toString());
     }
-    const amt = mode === 'advance' ? safeParseFloat(payAmount) : safeParseFloat(recoveryAmount);
+  }, [swipeWalletId, pgName, cardType, mode, recoveryMethod, selectedWallet, selectedPG]);
+
+  // Auto-calc service fee from rate on bill / swipe amount
+  useEffect(() => {
+    if (mode !== 'recovery') return;
+    const amt = safeParseFloat(recoveryAmount);
     if (amt > 0) {
       const rate = safeParseFloat(currentCommRate);
       const suggestedCollection = roundCurrency(amt * (rate / 100));
       setCollectionAmount(suggestedCollection.toString());
     }
-  }, [swipeWalletId, pgName, cardType, payAmount, recoveryAmount, mode, selectedWallet, selectedPG, currentCommRate]);
+  }, [recoveryAmount, mode, recoveryMethod, currentCommRate]);
 
   const amount = safeParseFloat(payAmount);
+  const advanceTransferFeeVal = safeParseFloat(advanceTransferFee);
+  const advanceTotalDebit = roundCurrency(amount + Math.max(0, advanceTransferFeeVal));
   const recoveryAmt = safeParseFloat(recoveryAmount);
   const collAmount = safeParseFloat(collectionAmount);
   const mdrPercent = safeParseFloat(appliedMdrPercent);
@@ -192,6 +229,11 @@ export const PaySwipe: React.FC = () => {
     else if (customerName.trim().length < 2) err.customerName = 'Name must be at least 2 characters';
     if (!payAmount?.trim()) err.payAmount = 'Advance amount is required';
     else if (amount <= 0) err.payAmount = 'Advance amount must be greater than 0';
+    if (advanceTransferFee !== '' && (isNaN(advanceTransferFeeVal) || advanceTransferFeeVal < 0)) {
+      err.advanceTransferFee = 'Transfer fee must be 0 or more';
+    } else if (advanceTransferFeeVal > amount) {
+      err.advanceTransferFee = 'Transfer fee cannot exceed advance amount';
+    }
     setErrors(err);
     return Object.keys(err).length === 0;
   };
@@ -213,16 +255,24 @@ export const PaySwipe: React.FC = () => {
       setIsNewCustomer(false);
     }
 
+    const transferFee = roundCurrency(Math.max(0, advanceTransferFeeVal));
+    const totalFromSource = roundCurrency(amount + transferFee);
     const entries: LedgerEntry[] = [
       { accountId: 'A006', debit: amount, credit: 0 },
-      { accountId: paySourceId, debit: 0, credit: amount }
+      { accountId: paySourceId, debit: 0, credit: totalFromSource },
     ];
+    if (transferFee > 0.005) {
+      entries.push({ accountId: 'E001', debit: transferFee, credit: 0 });
+    }
     setErrors({});
     const pending = postTransaction(
       `Advance Pay: ${customerName.trim()}`,
       TransactionType.PAY_SWIPE,
       entries,
-      { customerId: finalId || undefined }
+      {
+        customerId: finalId || undefined,
+        transferFee: transferFee > 0.005 ? transferFee : undefined,
+      }
     );
     if (!pending) return;
     try {
@@ -238,6 +288,7 @@ export const PaySwipe: React.FC = () => {
     setPhone('');
     setCustomerName('');
     setCustomerId(null);
+    setRecoveryMethod('card');
     setRecoveryAmount('');
     setCollectionAmount('');
     setRecoveryErrors({});
@@ -299,8 +350,17 @@ export const PaySwipe: React.FC = () => {
     const rateVal = safeParseFloat(currentCommRate);
     if (isNaN(rateVal) || rateVal < 0 || rateVal > 100) err.currentCommRate = 'Rate must be between 0 and 100%';
     const mdrVal = safeParseFloat(appliedMdrPercent);
-    if (appliedMdrPercent !== '' && (isNaN(mdrVal) || mdrVal < 0 || mdrVal > 100)) {
+    if (recoveryMethod === 'card' && appliedMdrPercent !== '' && (isNaN(mdrVal) || mdrVal < 0 || mdrVal > 100)) {
       err.appliedMdrPercent = 'Applied MDR must be between 0 and 100%';
+    }
+    if (recoveryMethod === 'card' && !wallets.find((w) => w.id === swipeWalletId)) {
+      err.recoveryAmount = err.recoveryAmount || 'Select a wallet for card swipe';
+    }
+    if (recoveryMethod === 'cash' && cashCollectOptions.length === 0) {
+      err.collectionAmount = 'No cash account found in Masters';
+    }
+    if (recoveryMethod === 'bank' && bankCollectOptions.length === 0) {
+      err.collectionAmount = 'No bank account found in Masters';
     }
     setRecoveryErrors(err);
     return Object.keys(err).length === 0;
@@ -309,36 +369,62 @@ export const PaySwipe: React.FC = () => {
   const handleRecovery = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateRecovery()) return;
-    const wallet = wallets.find(w => w.id === swipeWalletId);
-    if (!wallet) return;
 
     const rateVal = safeParseFloat(currentCommRate);
-    if (customerId) {
+    if (customerId && recoveryMethod === 'card') {
       const updatedRates = { ...commissionRates, [cardType]: rateVal };
       updateCustomer(customerId, { commissionRates: updatedRates });
     }
 
-    // 2. Financial Calculation: PG charges MDR, so wallet receives (recoveryAmt - MDR)
-    const mdr = roundCurrency(recoveryAmt * (mdrPercent / 100));
-    const netToWallet = roundCurrency(recoveryAmt - mdr);
+    const attributedTransferFee =
+      customerId != null
+        ? paySwipeRecoveryTransferFeePreview(customerId, recoveryAmt, transactions)
+        : 0;
 
-    const entries: LedgerEntry[] = [
-      // 1. Principal Recovery: Wallet receives NET (after MDR), Customer Debt cleared
-      { accountId: wallet.ledgerAccountId, debit: netToWallet, credit: 0 },
-      { accountId: 'A006', debit: 0, credit: recoveryAmt },
-      { accountId: 'E001', debit: mdr, credit: 0 },
+    let entries: LedgerEntry[];
+    let description: string;
+    let metadata: Transaction['metadata'];
 
-      // 2. Charges Collection (Bank UP, Income UP)
-      { accountId: collectAccount, debit: collAmount, credit: 0 },
-      { accountId: 'I001', debit: 0, credit: collAmount }
-    ];
+    if (recoveryMethod === 'cash' || recoveryMethod === 'bank') {
+      const totalReceived = roundCurrency(recoveryAmt + collAmount);
+      entries = [
+        { accountId: collectAccount, debit: totalReceived, credit: 0 },
+        { accountId: 'A006', debit: 0, credit: recoveryAmt },
+      ];
+      if (collAmount > 0.005) {
+        entries.push({ accountId: 'I001', debit: 0, credit: collAmount });
+      }
+      const methodLabel = recoveryMethod === 'cash' ? 'CASH' : 'BANK';
+      description = `Recovery: ${customerName} (${methodLabel})`;
+      metadata = {
+        customerId: customerId || undefined,
+        paySwipeRecoveryMethod: recoveryMethod,
+        transferFee: attributedTransferFee > 0.005 ? attributedTransferFee : undefined,
+      };
+    } else {
+      const wallet = wallets.find((w) => w.id === swipeWalletId);
+      if (!wallet) return;
 
-    const pending = postTransaction(
-      `Recovery: ${customerName} (${cardType.toUpperCase()})`,
-      TransactionType.PAY_SWIPE,
-      entries,
-      { customerId: customerId || undefined, walletId: wallet.id, cardType: cardType }
-    );
+      const mdr = roundCurrency(recoveryAmt * (mdrPercent / 100));
+      const netToWallet = roundCurrency(recoveryAmt - mdr);
+      entries = [
+        { accountId: wallet.ledgerAccountId, debit: netToWallet, credit: 0 },
+        { accountId: 'A006', debit: 0, credit: recoveryAmt },
+        { accountId: 'E001', debit: mdr, credit: 0 },
+        { accountId: collectAccount, debit: collAmount, credit: 0 },
+        { accountId: 'I001', debit: 0, credit: collAmount },
+      ];
+      description = `Recovery: ${customerName} (${cardType.toUpperCase()})`;
+      metadata = {
+        customerId: customerId || undefined,
+        walletId: wallet.id,
+        cardType,
+        paySwipeRecoveryMethod: 'card',
+        transferFee: attributedTransferFee > 0.005 ? attributedTransferFee : undefined,
+      };
+    }
+
+    const pending = postTransaction(description, TransactionType.PAY_SWIPE, entries, metadata);
     if (!pending) return;
     try {
       await pending;
@@ -351,7 +437,15 @@ export const PaySwipe: React.FC = () => {
 
   const recoveryMdrAmt = mdrPercent > 0 ? roundCurrency(recoveryAmt * (mdrPercent / 100)) : 0;
   const recoveryNetToWallet = Math.max(0, roundCurrency(recoveryAmt - recoveryMdrAmt));
-  const collectIntoLabel = collectIntoOptions.find((o) => o.value === collectAccount)?.label ?? '—';
+  const recoveryTransferFeePreview =
+    customerId && !isNewCustomer
+      ? paySwipeRecoveryTransferFeePreview(customerId, recoveryAmt, transactions)
+      : 0;
+  const recoveryNetMargin =
+    recoveryMethod === 'card'
+      ? roundCurrency(collAmount - recoveryMdrAmt - recoveryTransferFeePreview)
+      : roundCurrency(collAmount - recoveryTransferFeePreview);
+  const collectIntoLabel = recoveryCollectOptions.find((o) => o.value === collectAccount)?.label ?? '—';
   const payFromOptions = collectIntoOptions.map((o) => ({
     value: o.value,
     label: `${o.label} (${formatCurrency(getAccountBalance(o.value))})`,
@@ -364,10 +458,10 @@ export const PaySwipe: React.FC = () => {
           <div className={mode === 'recovery' ? 'lg:col-span-2 space-y-6' : 'space-y-6'}>
         <div className="flex items-center gap-2 p-2 bg-slate-100 rounded-2xl mb-8">
           <button type="button" onClick={() => { setMode('advance'); resetForm(); }} className={`flex-1 py-3 px-5 rounded-xl font-bold transition-all ${mode === 'advance' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-white'}`}>
-            Pay Advance
+            Pay Bill (Advance)
           </button>
           <button type="button" onClick={() => { setMode('recovery'); resetForm(); }} className={`flex-1 py-3 px-5 rounded-xl font-bold transition-all ${mode === 'recovery' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-600 hover:bg-white'}`}>
-            Swipe Recovery
+            Collect from Customer
           </button>
         </div>
 
@@ -398,8 +492,40 @@ export const PaySwipe: React.FC = () => {
                     />
                 </div>
 
-                <Input label="Advance Amount" type="number" className="font-bold text-lg" value={payAmount} onChange={e => { setPayAmount(e.target.value); setErrors(p => ({...p, payAmount: ''})); }} error={errors.payAmount} placeholder="0" />
+                <Input label="Bill Amount (₹)" type="number" className="font-bold text-lg" value={payAmount} onChange={e => { setPayAmount(e.target.value); setErrors(p => ({...p, payAmount: ''})); }} error={errors.payAmount} placeholder="0" />
+                <Input
+                  label="Transfer Fee (₹)"
+                  type="number"
+                  value={advanceTransferFee}
+                  onChange={(e) => {
+                    setAdvanceTransferFee(e.target.value);
+                    setErrors((p) => ({ ...p, advanceTransferFee: '' }));
+                  }}
+                  error={errors.advanceTransferFee}
+                  placeholder="0"
+                />
+                <p className="text-xs text-slate-500 -mt-4 font-medium">
+                  Wallet/bank-la customer credit card bill pay pannumbodhu extra fee (e.g. ₹10,000 bill + ₹15 fee = ₹10,015). Intha fee ungal profit-la minus aagum.
+                </p>
                 <Select label="Pay From" value={paySourceId} onChange={e => setPaySourceId(e.target.value)} options={payFromOptions.length ? payFromOptions : collectIntoOptions} />
+                {amount > 0.005 ? (
+                  <div className="p-4 rounded-xl bg-indigo-50/80 border border-indigo-100 space-y-2 text-sm">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-slate-600">Bill amount</span>
+                      <span className="font-mono font-semibold tabular-nums">{formatCurrency(amount)}</span>
+                    </div>
+                    {advanceTransferFeeVal > 0.005 ? (
+                      <div className="flex justify-between gap-3">
+                        <span className="text-slate-600">Transfer fee</span>
+                        <span className="font-mono font-semibold tabular-nums text-amber-800">+{formatCurrency(advanceTransferFeeVal)}</span>
+                      </div>
+                    ) : null}
+                    <div className="flex justify-between gap-3 pt-2 border-t border-indigo-200/80">
+                      <span className="font-bold text-slate-800">Total debit from account</span>
+                      <span className="font-mono font-black tabular-nums text-indigo-900">{formatCurrency(advanceTotalDebit)}</span>
+                    </div>
+                  </div>
+                ) : null}
                 <Button type="submit" className="w-full">Pay Bill (Record Advance) <ArrowRight size={16}/></Button>
               </form>
             ) : (
@@ -411,7 +537,7 @@ export const PaySwipe: React.FC = () => {
                       <div className="text-sm text-emerald-900">
                         <p className="font-bold">Customers with Pay &amp; Swipe receivable</p>
                         <p className="text-emerald-800/90 mt-1">
-                          Advance principal still on receivables (A006). Same idea as Swipe &amp; Pay outflow: pick who you are recovering for, then complete the swipe details.
+                          Bill pay pannirukinga — ippo customer kitte amount edukka Cash, Bank, or Card swipe choose pannunga.
                         </p>
                       </div>
                     </div>
@@ -495,11 +621,53 @@ export const PaySwipe: React.FC = () => {
                       </Button>
                     </div>
 
+                    <div className="flex flex-wrap gap-2 p-2 bg-slate-100 rounded-xl">
+                      {([
+                        { id: 'card' as const, label: 'Card Swipe' },
+                        { id: 'cash' as const, label: 'Cash' },
+                        { id: 'bank' as const, label: 'Bank Transfer' },
+                      ]).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setRecoveryMethod(opt.id)}
+                          className={`flex-1 min-w-[7rem] py-2.5 px-3 rounded-lg text-sm font-bold transition-all ${
+                            recoveryMethod === opt.id
+                              ? 'bg-emerald-600 text-white shadow-md'
+                              : 'bg-white text-slate-600 hover:bg-emerald-50'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-500 font-medium -mt-2">
+                      {recoveryMethod === 'card'
+                        ? 'Customer card-la swipe pannuvanga — wallet-ku varum, portal MDR mattum expense.'
+                        : recoveryMethod === 'cash'
+                          ? 'Customer cash kudukaranga — principal + ungal fee cash account-la.'
+                          : 'Customer bank transfer pannuvanga — principal + ungal fee bank account-la.'}
+                    </p>
+
                 <div>
-                  <Input label="Amount to be swiped — principal (₹)" type="number" className="font-bold text-lg" value={recoveryAmount} onChange={e => { setRecoveryAmount(e.target.value); setRecoveryErrors(p => ({...p, recoveryAmount: ''})); }} error={recoveryErrors.recoveryAmount} placeholder="0" />
-                  <p className="text-xs text-slate-500 mt-1.5 font-medium">Gross card amount cleared from receivables (same as <strong>Principal</strong> in Transaction P&amp;L).</p>
+                  <Input
+                    label={recoveryMethod === 'card' ? 'Amount to be swiped — principal (₹)' : 'Principal to collect (₹)'}
+                    type="number"
+                    className="font-bold text-lg"
+                    value={recoveryAmount}
+                    onChange={e => { setRecoveryAmount(e.target.value); setRecoveryErrors(p => ({...p, recoveryAmount: ''})); }}
+                    error={recoveryErrors.recoveryAmount}
+                    placeholder="0"
+                  />
+                  <p className="text-xs text-slate-500 mt-1.5 font-medium">
+                    {recoveryMethod === 'card'
+                      ? 'Gross card amount cleared from receivables (same as Principal in Transaction P&L).'
+                      : 'Bill pay pannirundha amount — receivable (A006) clear aagum.'}
+                  </p>
                 </div>
-                
+
+                {recoveryMethod === 'card' ? (
+                <>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Select label="Swipe Into Wallet" value={swipeWalletId} onChange={e => setSwipeWalletId(e.target.value)} options={wallets.map(w => ({ label: w.name, value: w.id }))} />
                   <Select 
@@ -550,10 +718,44 @@ export const PaySwipe: React.FC = () => {
                     <Input label="Charges collected — your fee (₹)" type="number" value={collectionAmount} onChange={e => { setCollectionAmount(e.target.value); setRecoveryErrors(p => ({...p, collectionAmount: ''})); }} error={recoveryErrors.collectionAmount} />
                     <p className="text-xs text-slate-500 mt-1.5 font-medium">Default from rate {currentCommRate}% on principal; edit if needed. Books to income (I001) into the account below.</p>
                   </div>
-                  <Select label="Collected into (cash / bank / wallet)" value={collectAccount} onChange={e => setCollectAccount(e.target.value)} options={collectIntoOptions} />
+                  <Select label="Fee collected into (cash / bank / wallet)" value={collectAccount} onChange={e => setCollectAccount(e.target.value)} options={collectIntoOptions} />
                 </div>
+                </>
+                ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Input
+                    label="Your service fee — rate (%)"
+                    type="number"
+                    step="0.1"
+                    value={currentCommRate}
+                    onChange={(e) => {
+                      setCurrentCommRate(e.target.value);
+                      setRecoveryErrors((p) => ({ ...p, currentCommRate: '' }));
+                    }}
+                    error={recoveryErrors.currentCommRate}
+                  />
+                  <Input
+                    label="Your fee (₹)"
+                    type="number"
+                    value={collectionAmount}
+                    onChange={(e) => {
+                      setCollectionAmount(e.target.value);
+                      setRecoveryErrors((p) => ({ ...p, collectionAmount: '' }));
+                    }}
+                    error={recoveryErrors.collectionAmount}
+                  />
+                  <Select
+                    label={recoveryMethod === 'cash' ? 'Received into — Cash' : 'Received into — Bank'}
+                    value={collectAccount}
+                    onChange={(e) => setCollectAccount(e.target.value)}
+                    options={recoveryCollectOptions.length ? recoveryCollectOptions : [{ value: '', label: 'No account' }]}
+                  />
+                </div>
+                )}
 
-                <Button type="submit" variant="success" className="w-full">Complete Recovery</Button>
+                <Button type="submit" variant="success" className="w-full">
+                  {recoveryMethod === 'card' ? 'Complete Card Recovery' : recoveryMethod === 'cash' ? 'Record Cash Collection' : 'Record Bank Collection'}
+                </Button>
                   </>
                 )}
               </form>
@@ -572,9 +774,13 @@ export const PaySwipe: React.FC = () => {
                   </div>
                   <CardContent className="p-6 space-y-5 bg-slate-800/40">
                     <div className="flex justify-between items-baseline gap-3">
-                      <span className="text-sm font-semibold text-slate-300">Amount to be swiped (principal)</span>
+                      <span className="text-sm font-semibold text-slate-300">
+                        {recoveryMethod === 'card' ? 'Amount to be swiped (principal)' : 'Principal to collect'}
+                      </span>
                       <span className="text-xl font-black tabular-nums text-white">{formatCurrency(recoveryAmt)}</span>
                     </div>
+                    {recoveryMethod === 'card' ? (
+                    <>
                     <div className="flex justify-between items-baseline gap-3">
                       <span className="text-sm font-semibold text-indigo-200">Charges collected ({String(currentCommRate)}%)</span>
                       <span className="text-lg font-bold tabular-nums text-indigo-100">{formatCurrency(collAmount)}</span>
@@ -587,11 +793,37 @@ export const PaySwipe: React.FC = () => {
                       <span className="text-sm font-bold text-emerald-200 uppercase tracking-wide">Net to wallet</span>
                       <span className="text-2xl font-black tabular-nums text-emerald-300">{formatCurrency(recoveryNetToWallet)}</span>
                     </div>
+                    </>
+                    ) : (
+                    <>
+                    <div className="flex justify-between items-baseline gap-3">
+                      <span className="text-sm font-semibold text-indigo-200">Your service fee ({String(currentCommRate)}%)</span>
+                      <span className="text-lg font-bold tabular-nums text-indigo-100">{formatCurrency(collAmount)}</span>
+                    </div>
+                    <div className="border-t border-slate-600 pt-4 flex justify-between items-baseline gap-3">
+                      <span className="text-sm font-bold text-emerald-200 uppercase tracking-wide">Total received</span>
+                      <span className="text-2xl font-black tabular-nums text-emerald-300">{formatCurrency(roundCurrency(recoveryAmt + collAmount))}</span>
+                    </div>
+                    </>
+                    )}
+                    {recoveryTransferFeePreview > 0.005 ? (
+                      <div className="flex justify-between items-baseline gap-3">
+                        <span className="text-sm font-semibold text-amber-200">Transfer fee (from bill pay)</span>
+                        <span className="text-lg font-bold tabular-nums text-amber-100">−{formatCurrency(recoveryTransferFeePreview)}</span>
+                      </div>
+                    ) : null}
                     <div className="border-t border-slate-600 pt-4">
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Collected into</p>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                        {recoveryMethod === 'card' ? 'Fee collected into' : 'Received into'}
+                      </p>
                       <p className="text-sm font-semibold text-slate-100 leading-snug">{collectIntoLabel}</p>
                     </div>
-                    <p className="text-[11px] text-slate-500 leading-relaxed pt-2">Net margin on this recovery (for P&amp;L): charges collected − MDR = <span className="text-slate-300 font-semibold tabular-nums">{formatCurrency(roundCurrency(collAmount - recoveryMdrAmt))}</span>.</p>
+                    <p className="text-[11px] text-slate-500 leading-relaxed pt-2">
+                      Net margin (P&amp;L): your fee
+                      {recoveryMethod === 'card' ? ' − MDR' : ''}
+                      {recoveryTransferFeePreview > 0.005 ? ' − transfer fee' : ''} ={' '}
+                      <span className="text-slate-300 font-semibold tabular-nums">{formatCurrency(recoveryNetMargin)}</span>.
+                    </p>
                   </CardContent>
                 </Card>
               ) : (
@@ -615,8 +847,14 @@ export const PaySwipe: React.FC = () => {
           }
           subtitleForTxn={(t) => {
             const w = wallets.find((x) => x.id === t.metadata?.walletId);
-            if (w) return `${w.name} wallet`;
-            return (t.description || '').toLowerCase().includes('recovery') ? 'Recovery' : 'Advance / repayment';
+            if (w) return `${w.name} · card swipe`;
+            const desc = (t.description || '').toLowerCase();
+            if (desc.includes('recovery')) {
+              if (/\(cash\)/i.test(t.description)) return 'Cash collection';
+              if (/\(bank\)/i.test(t.description)) return 'Bank collection';
+              return 'Card recovery';
+            }
+            return 'Bill pay / advance';
           }}
           onEditTxn={(t) => setEditingTxn(t)}
         />
