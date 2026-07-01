@@ -35,7 +35,7 @@ import {
   deferredSwipePortalExpenseInSubset,
 } from '../lib/swipeTxnEconomics';
 import { buildPaySwipePLRows } from '../lib/paySwipeTxnReport';
-import { buildReceivablesPayablesSummary } from '../lib/receivablesPayables';
+import { buildReceivablesPayablesSummary, receivableBreakdownRows } from '../lib/receivablesPayables';
 import { TransactionEditRouter } from '../components/TransactionEditRouter';
 import { TempManualJournalForm } from '../components/TempManualJournalForm';
 import { TEMP_ALLOW_LEDGER_REPORT_PL_EDIT } from '../lib/tempUiFlags';
@@ -137,6 +137,8 @@ export const Reports: React.FC = () => {
     () => buildReceivablesPayablesSummary(transactions, wallets, accounts, customers, getAccountBalance),
     [transactions, wallets, accounts, customers, getAccountBalance]
   );
+
+  const receivableRows = useMemo(() => receivableBreakdownRows(rpSummary), [rpSummary]);
 
   const walletBalanceCompare = useMemo(() => {
     const balA = getAccountBalancesAsOf(bsCompareDayA);
@@ -294,7 +296,9 @@ export const Reports: React.FC = () => {
       data = data.filter((r) => r.customerId === txnCustomerFilter);
     }
     if (txnWalletFilter !== 'all') {
-      data = data.filter((r) => r.kind === 'recovery' && r.raw.metadata?.walletId === txnWalletFilter);
+      data = data.filter(
+        (r) => r.kind === 'deal' && (r.recoveryTxn?.metadata?.walletId ?? r.raw.metadata?.walletId) === txnWalletFilter
+      );
     }
     data = [...data].sort((a, b) => {
       if (txnSortBy === 'date') return new Date(b.date).getTime() - new Date(a.date).getTime();
@@ -311,20 +315,20 @@ export const Reports: React.FC = () => {
       (acc, r) => {
         acc.principal += r.principal;
         acc.mdrCost += r.mdrCost;
+        acc.transferFee += r.transferFee;
         acc.netToWallet += r.netToWallet;
         acc.chargesCollected += r.chargesCollected;
-        acc.transferFee += r.transferFee;
         acc.netMargin += r.netMargin;
         return acc;
       },
-      { principal: 0, mdrCost: 0, netToWallet: 0, chargesCollected: 0, transferFee: 0, netMargin: 0 }
+      { principal: 0, mdrCost: 0, transferFee: 0, netToWallet: 0, chargesCollected: 0, netMargin: 0 }
     );
     return {
       principal: roundCurrency(sums.principal),
       mdrCost: roundCurrency(sums.mdrCost),
+      transferFee: roundCurrency(sums.transferFee),
       netToWallet: roundCurrency(sums.netToWallet),
       chargesCollected: roundCurrency(sums.chargesCollected),
-      transferFee: roundCurrency(sums.transferFee),
       netMargin: roundCurrency(sums.netMargin),
     };
   }, [paySwipeTxnPL]);
@@ -363,23 +367,24 @@ export const Reports: React.FC = () => {
   const exportTxnPL = () => {
     if (txnPlMode === 'pay-swipe') {
       const headers = [
-        '#', 'Date', 'Lead', 'Customer', 'Type', 'Wallet', 'Card', 'Principal', 'MDR', 'Net to wallet',
-        'Charges collected', 'Transfer fee', 'Collected / paid from', 'Net margin', 'Remarks',
+        '#', 'Date', 'Lead', 'Customer', 'Status', 'Wallet', 'Card', 'Principal', 'MDR', 'Xfer fee', 'Net to wallet',
+        'Charges collected', 'Collected into', 'Pay from', 'Net margin', 'Remarks',
       ];
       const rows = paySwipeTxnPL.map((r, i) => [
         String(i + 1),
         new Date(r.date).toLocaleDateString(),
         r.lead,
         r.customer,
-        r.kind === 'advance' ? 'Advance' : 'Recovery',
+        r.kind === 'pending' ? 'Awaiting recovery' : 'Deal',
         r.walletName,
         r.card,
         formatCurrency(r.principal),
         formatCurrency(r.mdrCost),
+        formatCurrency(r.transferFee),
         formatCurrency(r.netToWallet),
         formatCurrency(r.chargesCollected),
-        formatCurrency(r.transferFee),
         r.counterpartyAccount,
+        r.payFromAccount,
         formatCurrency(r.netMargin),
         r.remarks,
       ]);
@@ -595,13 +600,13 @@ export const Reports: React.FC = () => {
                   }
                 />
                 <CardContent className="!pt-0">
-                  {rpSummary.receivables.length === 0 ? (
+                  {receivableRows.length === 0 ? (
                     <p className="text-sm text-slate-500 py-6 text-center">No receivables on the books.</p>
                   ) : (
                     <DataTable
                       headers={['Item', 'Amount', 'Note']}
                       rows={[
-                        ...rpSummary.receivables.map((r) => [
+                        ...receivableRows.map((r) => [
                           r.label,
                           formatCurrency(r.amount),
                           r.detail ?? '—',
@@ -725,7 +730,7 @@ export const Reports: React.FC = () => {
                       onClick={() => setTxnPlMode('pay-swipe')}
                       className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-all ${txnPlMode === 'pay-swipe' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-600 hover:bg-white'}`}
                     >
-                      Pay &amp; Swipe (Advance / Recovery)
+                      Pay &amp; Swipe (Deals)
                     </button>
                   </div>
                 </div>
@@ -747,7 +752,7 @@ export const Reports: React.FC = () => {
                     value={txnWalletFilter}
                     onChange={e => setTxnWalletFilter(e.target.value)}
                     className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 min-w-[180px]"
-                    title={txnPlMode === 'pay-swipe' ? 'Recovery rows only; advances have no wallet' : 'Swipe inflow wallet'}
+                    title={txnPlMode === 'pay-swipe' ? 'Completed deals only; pending advances have no wallet' : 'Swipe inflow wallet'}
                   >
                     <option value="all">All Wallets</option>
                     {wallets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
@@ -784,7 +789,7 @@ export const Reports: React.FC = () => {
               subtitle={
                 txnPlMode === 'swipe-inflow'
                   ? 'Customer amount = swipe × customer %; Our charges = swipe × our %; Other value = franchise gap (mediator share — separate column, not deducted from net profit); Mediator paid via Swipe & Pay → Mediator Payout; Net profit = our charges − app − transfer fee + extra only.'
-                  : 'Advance = customer receivable (A006) + optional wallet transfer fee (E001). Recovery = swipe clears receivable, MDR to E001, net to wallet, charges to I001. Net margin = charges collected − MDR − transfer fee (recovery rows; fee from linked advance).'
+                  : 'One row per deal (advance + recovery matched by customer & principal). Cash/bank/card recovery supported. Net margin = charges collected − MDR − transfer fee.'
               }
               action={<Button size="sm" variant="outline" onClick={exportTxnPL}><Download size={14} /> Export CSV</Button>}
             />
@@ -795,7 +800,7 @@ export const Reports: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <strong>Pay &amp; Swipe</strong> advances and recoveries from the filtered date range / search. Wallet filter applies to <em>recovery</em> rows only.
+                  <strong>Pay &amp; Swipe</strong> deals from the filtered date range / search. Wallet filter applies to <em>completed</em> deals only.
                 </>
               )}
             </p>
@@ -866,7 +871,7 @@ export const Reports: React.FC = () => {
             <DataTable
               minTableWidth={TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? 1680 : 1640}
               headers={[
-                '#', 'Date', 'Lead', 'Customer', 'Type', 'Wallet', 'Card', 'Principal', 'MDR', 'Net to wlt', 'Charges coll.', 'Xfer fee', 'From / into', 'Net margin', 'Remarks',
+                '#', 'Date', 'Lead', 'Customer', 'Status', 'Wallet', 'Card', 'Principal', 'MDR', 'Xfer fee', 'Net to wlt', 'Charges coll.', 'Collected into', 'Pay from', 'Net margin', 'Remarks',
                 ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? ['Edit'] : []),
               ]}
               rows={paySwipeTxnPL.map((t, idx) => [
@@ -874,15 +879,16 @@ export const Reports: React.FC = () => {
                 new Date(t.date).toLocaleDateString(),
                 t.lead,
                 <span className="font-medium text-slate-800 whitespace-nowrap">{t.customer}</span>,
-                <span className={`font-bold text-xs uppercase px-2 py-0.5 rounded-md ${t.kind === 'advance' ? 'bg-slate-200 text-slate-700' : 'bg-emerald-100 text-emerald-800'}`}>{t.kind === 'advance' ? 'Advance' : 'Recovery'}</span>,
+                <span className={`font-bold text-xs uppercase px-2 py-0.5 rounded-md ${t.kind === 'pending' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-800'}`}>{t.kind === 'pending' ? 'Awaiting recovery' : 'Deal'}</span>,
                 <span className="whitespace-nowrap">{t.walletName}</span>,
                 t.card,
                 formatCurrency(t.principal),
                 formatCurrency(t.mdrCost),
+                formatCurrency(t.transferFee),
                 formatCurrency(t.netToWallet),
                 formatCurrency(t.chargesCollected),
-                formatCurrency(t.transferFee),
                 <span className="whitespace-nowrap text-slate-700">{t.counterpartyAccount}</span>,
+                <span className="whitespace-nowrap text-slate-600">{t.payFromAccount}</span>,
                 <span className={`font-bold ${t.netMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCurrency(t.netMargin)}</span>,
                 <span className="max-w-[10rem] truncate block text-xs text-slate-600" title={t.raw.description}>{t.remarks}</span>,
                 ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT
@@ -908,9 +914,10 @@ export const Reports: React.FC = () => {
                 '',
                 formatCurrency(paySwipeTxnPLTotals.principal),
                 formatCurrency(paySwipeTxnPLTotals.mdrCost),
+                formatCurrency(paySwipeTxnPLTotals.transferFee),
                 formatCurrency(paySwipeTxnPLTotals.netToWallet),
                 formatCurrency(paySwipeTxnPLTotals.chargesCollected),
-                formatCurrency(paySwipeTxnPLTotals.transferFee),
+                '',
                 '',
                 <span className={`font-bold ${paySwipeTxnPLTotals.netMargin >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                   {formatCurrency(paySwipeTxnPLTotals.netMargin)}
@@ -918,7 +925,7 @@ export const Reports: React.FC = () => {
                 '',
                 ...(TEMP_ALLOW_LEDGER_REPORT_PL_EDIT ? [''] : []),
               ]}
-              rightAlignColumns={[7, 8, 9, 10, 11, 12, 13]}
+              rightAlignColumns={[7, 8, 9, 10, 11, 14]}
             />
             )}
           </Card>

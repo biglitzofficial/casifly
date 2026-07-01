@@ -175,25 +175,26 @@ export function customerPaySwipeReceivableOutstanding(customerId: string, transa
   return roundCurrency(bal);
 }
 
+/** One workbook row per deal (advance + recovery matched), or pending advance. */
 export type PaySwipePLRow = {
   id: string;
   raw: Transaction;
+  advanceTxn?: Transaction;
+  recoveryTxn?: Transaction;
   date: string;
-  kind: 'advance' | 'recovery';
+  kind: 'deal' | 'pending';
   customerId?: string;
   customer: string;
   lead: string;
   walletName: string;
   card: string;
-  /** Advance: amount to A006. Recovery: gross swipe / principal cleared (A006 credit). */
   principal: number;
   mdrCost: number;
+  transferFee: number;
   netToWallet: number;
   chargesCollected: number;
-  /** Advance: wallet transfer fee. Recovery: fee attributed from linked advance(s). */
-  transferFee: number;
-  /** Recovery: collection asset name. Advance: source (bank/cash) name. */
   counterpartyAccount: string;
+  payFromAccount: string;
   netMargin: number;
   remarks: string;
 };
@@ -205,29 +206,36 @@ function leadLabel(t: Transaction, userId?: string, userName?: string): string {
   return '—';
 }
 
-function parseAdvance(
+function payFromAccountForAdvance(t: Transaction, accounts: Account[]): string {
+  for (const e of t.entries) {
+    if (e.credit > 0.005 && e.accountId !== 'A006') {
+      return accounts.find((a) => a.id === e.accountId)?.name ?? e.accountId;
+    }
+  }
+  return '—';
+}
+
+type PendingAdvanceRow = PaySwipePLRow & { kind: 'pending' };
+type RecoveryPartsRow = Omit<PaySwipePLRow, 'kind' | 'payFromAccount' | 'netMargin'> & { kind: 'deal' };
+
+function parseAdvanceParts(
   t: Transaction,
   accounts: Account[],
   customers: Customer[],
   userId?: string,
   userName?: string,
-): PaySwipePLRow {
+): PendingAdvanceRow {
   const principal = roundCurrency(sumAcct(t.entries, 'A006', 'debit'));
   const transferFee = transferFeeFromPaySwipeAdvance(t);
-  let counterpartyAccount = '—';
-  for (const e of t.entries) {
-    if (e.credit > 0.005 && e.accountId !== 'A006') {
-      counterpartyAccount = accounts.find((a) => a.id === e.accountId)?.name ?? e.accountId;
-      break;
-    }
-  }
+  const payFromAccount = payFromAccountForAdvance(t, accounts);
   const cid = t.metadata?.customerId;
   const customer = customers.find((c) => c.id === cid)?.name ?? '—';
   return {
     id: t.id,
     raw: t,
+    advanceTxn: t,
     date: t.date,
-    kind: 'advance',
+    kind: 'pending',
     customerId: cid,
     customer,
     lead: leadLabel(t, userId, userName),
@@ -235,16 +243,17 @@ function parseAdvance(
     card: '—',
     principal,
     mdrCost: 0,
+    transferFee,
     netToWallet: 0,
     chargesCollected: 0,
-    transferFee,
-    counterpartyAccount,
-    netMargin: 0,
-    remarks: t.description.length > 48 ? `${t.description.slice(0, 48)}…` : t.description,
+    counterpartyAccount: payFromAccount,
+    payFromAccount,
+    netMargin: transferFee > 0.005 ? roundCurrency(-transferFee) : 0,
+    remarks: 'Awaiting recovery',
   };
 }
 
-function parseRecovery(
+function parseRecoveryParts(
   t: Transaction,
   wallets: Wallet[],
   accounts: Account[],
@@ -252,7 +261,7 @@ function parseRecovery(
   transactions: Transaction[],
   userId?: string,
   userName?: string,
-): PaySwipePLRow | null {
+): RecoveryPartsRow | null {
   if (!isPaySwipeRecovery(t)) return null;
   const principal = roundCurrency(sumAcct(t.entries, 'A006', 'credit'));
   const mdrCost = roundCurrency(sumAcct(t.entries, 'E001', 'debit'));
@@ -280,7 +289,6 @@ function parseRecovery(
     break;
   }
 
-  const netMargin = roundCurrency(chargesCollected - mdrCost - transferFee);
   const cid = t.metadata?.customerId;
   const customer = customers.find((c) => c.id === cid)?.name ?? '—';
   const method = paySwipeRecoveryMethod(t);
@@ -293,8 +301,9 @@ function parseRecovery(
   return {
     id: t.id,
     raw: t,
+    recoveryTxn: t,
     date: t.date,
-    kind: 'recovery',
+    kind: 'deal',
     customerId: cid,
     customer,
     lead: leadLabel(t, userId, userName),
@@ -302,15 +311,30 @@ function parseRecovery(
     card: cardLabel === '—' ? '—' : cardLabel,
     principal,
     mdrCost,
+    transferFee,
     netToWallet,
     chargesCollected,
-    transferFee,
     counterpartyAccount,
-    netMargin,
     remarks: t.description.length > 48 ? `${t.description.slice(0, 48)}…` : t.description,
   };
 }
 
+function mergeDeal(advance: PendingAdvanceRow | undefined, recovery: RecoveryPartsRow): PaySwipePLRow {
+  const transferFee = advance?.transferFee ?? recovery.transferFee;
+  const payFromAccount = advance?.payFromAccount ?? '—';
+  const netMargin = roundCurrency(recovery.chargesCollected - recovery.mdrCost - transferFee);
+  return {
+    ...recovery,
+    advanceTxn: advance?.raw,
+    recoveryTxn: recovery.raw,
+    transferFee,
+    payFromAccount,
+    netMargin,
+    remarks: advance ? 'Advance paid + recovery' : recovery.remarks,
+  };
+}
+
+/** Single-row P&L per deal (matched by customer + principal, FIFO). Unmatched advances = pending. */
 export function buildPaySwipePLRows(
   transactions: Transaction[],
   wallets: Wallet[],
@@ -319,16 +343,42 @@ export function buildPaySwipePLRows(
   userId?: string,
   userName?: string,
 ): PaySwipePLRow[] {
-  const rows: PaySwipePLRow[] = [];
+  const advances: PendingAdvanceRow[] = [];
+  const recoveries: RecoveryPartsRow[] = [];
+
   for (const t of transactions) {
     if (t.type !== TransactionType.PAY_SWIPE || t.status !== 'COMPLETED') continue;
     if (isPaySwipeAdvance(t)) {
-      rows.push(parseAdvance(t, accounts, customers, userId, userName));
+      advances.push(parseAdvanceParts(t, accounts, customers, userId, userName));
     } else if (isPaySwipeRecovery(t)) {
-      const r = parseRecovery(t, wallets, accounts, customers, transactions, userId, userName);
-      if (r) rows.push(r);
+      const r = parseRecoveryParts(t, wallets, accounts, customers, transactions, userId, userName);
+      if (r) recoveries.push(r);
     }
   }
+
+  advances.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  recoveries.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  const usedAdvanceIds = new Set<string>();
+  const rows: PaySwipePLRow[] = [];
+
+  for (const rec of recoveries) {
+    const matchIdx = advances.findIndex(
+      (a) =>
+        !usedAdvanceIds.has(a.id) &&
+        a.customerId === rec.customerId &&
+        Math.abs(a.principal - rec.principal) < 0.01,
+    );
+    const advance = matchIdx >= 0 ? advances[matchIdx] : undefined;
+    if (advance) usedAdvanceIds.add(advance.id);
+    rows.push(mergeDeal(advance, rec));
+  }
+
+  for (const adv of advances) {
+    if (usedAdvanceIds.has(adv.id)) continue;
+    rows.push(adv);
+  }
+
   return rows;
 }
 
@@ -345,3 +395,5 @@ export function totalPaySwipeRecoveryNetMargin(transactions: Transaction[]): num
   sum -= unrecoveredPaySwipeAdvanceTransferFees(transactions);
   return roundCurrency(sum);
 }
+
+export const totalPaySwipeWorkbookNetMargin = totalPaySwipeRecoveryNetMargin;

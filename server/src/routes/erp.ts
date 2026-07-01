@@ -72,7 +72,7 @@ erpRouter.post('/accounts', async (req, res) => {
     res.status(403).json({ error: 'Master Admin or Store Admin required to create bank or cash accounts' });
     return;
   }
-  const { name, category } = req.body;
+  const { name, category, openingBalance } = req.body;
   if (!name?.trim()) {
     res.status(400).json({ error: 'Account name required' });
     return;
@@ -82,10 +82,34 @@ erpRouter.post('/accounts', async (req, res) => {
     res.status(400).json({ error: 'Category must be Bank or Cash' });
     return;
   }
+  const openingRaw = Number(openingBalance);
+  const opening = Number.isFinite(openingRaw) && openingRaw > 0 ? Math.round(openingRaw * 100) / 100 : 0;
+  if (opening > 1e12) {
+    res.status(400).json({ error: 'Opening balance too large' });
+    return;
+  }
   const id = getId('A');
   const categoryTitle = cat === 'bank' ? 'Bank' : 'Cash';
   const storeId = user.productId ?? null;
   await db.addAccount({ id, name: name.trim(), type: 'ASSET', category: categoryTitle, balance: 0, store_id: storeId });
+  if (opening > 0.005) {
+    const txnId = uuid();
+    const meta = { storeId: storeId || user.productId || undefined };
+    const entries = JSON.stringify([
+      { accountId: id, debit: opening, credit: 0 },
+      { accountId: 'Q002', debit: 0, credit: opening },
+    ]);
+    await db.addTransaction({
+      id: txnId,
+      date: new Date().toISOString(),
+      description: `Opening balance: ${name.trim()}`,
+      type: 'JOURNAL',
+      entries,
+      status: 'COMPLETED',
+      metadata: JSON.stringify(meta),
+      reference_id: null,
+    });
+  }
   res.json({
     id,
     name: name.trim(),

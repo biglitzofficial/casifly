@@ -85,7 +85,7 @@ export const api = {
     return fetchApi<unknown[]>('/erp/accounts');
   },
 
-  async addAccount(body: { name: string; category: 'Bank' | 'Cash' }) {
+  async addAccount(body: { name: string; category: 'Bank' | 'Cash'; openingBalance?: number }) {
     return fetchApi<unknown>('/erp/accounts', { method: 'POST', body: JSON.stringify(body) });
   },
 

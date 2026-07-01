@@ -17,8 +17,16 @@ export type RpLine = {
   detail?: string;
 };
 
+export type ReceivableWalletSnapshot = {
+  id: string;
+  label: string;
+  amount: number;
+};
+
 export type ReceivablesPayablesSummary = {
   receivables: RpLine[];
+  /** Office / OFC wallets with current ledger balance (includes ₹0 for display). */
+  receivableWalletSnapshots: ReceivableWalletSnapshot[];
   payables: RpLine[];
   totalReceivables: number;
   totalPayables: number;
@@ -41,6 +49,30 @@ export function buildReceivablesPayablesSummary(
 ): ReceivablesPayablesSummary {
   const receivables: RpLine[] = [];
   const payables: RpLine[] = [];
+  const receivableWalletSnapshots: ReceivableWalletSnapshot[] = [];
+  const snapshotIds = new Set<string>();
+
+  const pushWalletSnapshot = (ledgerAccountId: string, label: string) => {
+    if (snapshotIds.has(ledgerAccountId)) return;
+    snapshotIds.add(ledgerAccountId);
+    receivableWalletSnapshots.push({
+      id: ledgerAccountId,
+      label,
+      amount: roundCurrency(getAccountBalance(ledgerAccountId)),
+    });
+  };
+
+  for (const w of wallets) {
+    if (!isReceivableWallet(w)) continue;
+    pushWalletSnapshot(w.ledgerAccountId, w.name);
+  }
+
+  const walletLedgerIds = new Set(wallets.map((w) => w.ledgerAccountId));
+  for (const a of accounts) {
+    if (a.category !== 'Wallet' || walletLedgerIds.has(a.id)) continue;
+    if (!/(?:\bofc\b|\boffice\b|\breceivable\b|ofc)/i.test(a.name)) continue;
+    pushWalletSnapshot(a.id, a.name);
+  }
 
   const a006 = accounts.find((a) => a.id === 'A006');
   const paySwipeBal = roundCurrency(getAccountBalance('A006'));
@@ -53,29 +85,13 @@ export function buildReceivablesPayablesSummary(
     });
   }
 
-  for (const w of wallets) {
-    if (!isReceivableWallet(w)) continue;
-    const bal = roundCurrency(getAccountBalance(w.ledgerAccountId));
-    if (bal < 0.005) continue;
+  for (const snap of receivableWalletSnapshots) {
+    if (snap.amount < 0.005) continue;
     receivables.push({
-      id: w.id,
-      label: w.name,
-      amount: bal,
+      id: snap.id,
+      label: snap.label,
+      amount: snap.amount,
       detail: 'Office / receivable wallet (e.g. Prakash OFC)',
-    });
-  }
-
-  const walletLedgerIds = new Set(wallets.map((w) => w.ledgerAccountId));
-  for (const a of accounts) {
-    if (a.category !== 'Wallet' || walletLedgerIds.has(a.id)) continue;
-    if (!/(?:\bofc\b|\boffice\b|\breceivable\b|ofc)/i.test(a.name)) continue;
-    const bal = roundCurrency(getAccountBalance(a.id));
-    if (bal < 0.005) continue;
-    receivables.push({
-      id: a.id,
-      label: a.name,
-      amount: bal,
-      detail: 'Office / receivable wallet ledger',
     });
   }
 
@@ -118,7 +134,7 @@ export function buildReceivablesPayablesSummary(
   const totalReceivables = roundCurrency(receivables.reduce((s, r) => s + r.amount, 0));
   const totalPayables = roundCurrency(payables.reduce((s, p) => s + p.amount, 0));
 
-  return { receivables, payables, totalReceivables, totalPayables };
+  return { receivables, receivableWalletSnapshots, payables, totalReceivables, totalPayables };
 }
 
 /** Short labels for dashboard / summary chips. */
@@ -131,8 +147,29 @@ export function formatReceivablesSubtitle(
   summary: ReceivablesPayablesSummary,
   formatCurrency: (n: number) => string
 ): string {
-  if (summary.receivables.length === 0) return 'No receivables on books';
-  return summary.receivables
-    .map((r) => `${receivableLineShortLabel(r)} ${formatCurrency(r.amount)}`)
-    .join(' · ');
+  const parts: string[] = [];
+  for (const r of summary.receivables) {
+    parts.push(`${receivableLineShortLabel(r)} ${formatCurrency(r.amount)}`);
+  }
+  for (const w of summary.receivableWalletSnapshots) {
+    if (w.amount >= 0.005) continue;
+    parts.push(`${w.label} ${formatCurrency(0)}`);
+  }
+  if (parts.length === 0) return 'No receivables on books';
+  return parts.join(' · ');
+}
+
+/** Receivables table rows: non-zero lines plus office wallets at ₹0 (excluded from total). */
+export function receivableBreakdownRows(summary: ReceivablesPayablesSummary): RpLine[] {
+  const rows = [...summary.receivables];
+  for (const w of summary.receivableWalletSnapshots) {
+    if (w.amount >= 0.005) continue;
+    rows.push({
+      id: `zero-${w.id}`,
+      label: w.label,
+      amount: 0,
+      detail: 'Office wallet — no balance (not included in total)',
+    });
+  }
+  return rows;
 }

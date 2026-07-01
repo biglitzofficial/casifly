@@ -7,7 +7,7 @@ import {
 import { INITIAL_ACCOUNTS, INITIAL_CUSTOMERS, INITIAL_WALLETS } from '../constants';
 import { formatCurrency, generateId, roundCurrency, txnOnOrBeforeLocalDay, normalizeLedgerEntries } from '../lib/utils';
 import { deferredSwipePortalExpenseExcludedFromPl, totalSwipeInflowNetProfitWorkbook } from '../lib/swipeTxnEconomics';
-import { totalPaySwipeRecoveryNetMargin } from '../lib/paySwipeTxnReport';
+import { totalPaySwipeWorkbookNetMargin } from '../lib/paySwipeTxnReport';
 import { useToast } from './ToastContext';
 import { useAuth } from './AuthContext';
 import { api, USE_API } from '../lib/api';
@@ -36,7 +36,7 @@ interface ERPContextType {
   addWalletPG: (walletId: string, pgConfig: PGConfig) => void;
   updateWalletPG: (walletId: string, oldPgName: string, pgConfig: PGConfig) => void;
   removeWalletPG: (walletId: string, pgName: string) => void;
-  addAccount: (data: { name: string; category: 'Bank' | 'Cash' }) => void;
+  addAccount: (data: { name: string; category: 'Bank' | 'Cash'; openingBalance?: number }) => void;
   updateAccount: (id: string, data: { name: string }) => void | Promise<void>;
   deleteAccount: (id: string) => void | Promise<void>;
   /**
@@ -44,6 +44,11 @@ interface ERPContextType {
    * Positive: Dr wallet / Cr Q002. Negative: Dr Q002 / Cr wallet (reduces opening).
    */
   recordWalletOpeningBalance: (walletId: string, amount: number) => void | Promise<void>;
+  /**
+   * Opening capital on bank or cash: Dr bank/cash / Cr Q002 (same as wallet opening).
+   * Positive increases capital & asset; negative reduces.
+   */
+  recordAccountOpeningBalance: (accountId: string, amount: number) => void | Promise<void>;
 
   // Getters
   getAccountBalance: (accountId: string) => number;
@@ -441,33 +446,60 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  const recordWalletOpeningBalance = (walletId: string, amount: number) => {
+  const recordAssetOpeningBalance = (
+    assetAccountId: string,
+    displayName: string,
+    amount: number,
+    meta?: TransactionMetadata
+  ) => {
     const amt = roundCurrency(amount);
     if (Math.abs(amt) < 0.005) {
       toast.error('Enter a non-zero amount (use negative to reduce opening)');
       return;
     }
-    const wallet = allWallets.find((w) => w.id === walletId);
-    if (!wallet) return;
-    const meta: TransactionMetadata = { storeId: user?.productId ?? undefined, walletId: wallet.id };
+    const acc = accounts.find((a) => a.id === assetAccountId);
+    if (!acc) {
+      toast.error('Account not found');
+      return;
+    }
     let entries: LedgerEntry[];
     let desc: string;
     if (amt > 0) {
-      desc = `Opening balance (+): ${wallet.name}`;
+      desc = `Opening balance (+): ${displayName}`;
       entries = [
-        { accountId: wallet.ledgerAccountId, debit: amt, credit: 0 },
+        { accountId: assetAccountId, debit: amt, credit: 0 },
         { accountId: 'Q002', debit: 0, credit: amt },
       ];
     } else {
       const absAmt = Math.abs(amt);
-      desc = `Opening balance (−): ${wallet.name}`;
+      desc = `Opening balance (−): ${displayName}`;
       entries = [
         { accountId: 'Q002', debit: absAmt, credit: 0 },
-        { accountId: wallet.ledgerAccountId, debit: 0, credit: absAmt },
+        { accountId: assetAccountId, debit: 0, credit: absAmt },
       ];
     }
     const p = postTransaction(desc, TransactionType.JOURNAL, entries, meta);
     if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => {});
+  };
+
+  const recordWalletOpeningBalance = (walletId: string, amount: number) => {
+    const wallet = allWallets.find((w) => w.id === walletId);
+    if (!wallet) return;
+    recordAssetOpeningBalance(wallet.ledgerAccountId, wallet.name, amount, {
+      storeId: user?.productId ?? undefined,
+      walletId: wallet.id,
+    });
+  };
+
+  const recordAccountOpeningBalance = (accountId: string, amount: number) => {
+    const acc = accounts.find((a) => a.id === accountId);
+    if (!acc || (acc.category !== 'Bank' && acc.category !== 'Cash')) {
+      toast.error('Opening balance can only be posted to bank or cash accounts here.');
+      return;
+    }
+    recordAssetOpeningBalance(accountId, acc.name, amount, {
+      storeId: user?.productId ?? undefined,
+    });
   };
 
   const updateWallet = (id: string, data: Partial<Pick<Wallet, 'name' | 'walletKind'>>) => {
@@ -545,16 +577,23 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }));
   };
 
-  const addAccount = (data: { name: string; category: 'Bank' | 'Cash' }) => {
+  const addAccount = (data: { name: string; category: 'Bank' | 'Cash'; openingBalance?: number }) => {
+    const opening = roundCurrency(Math.max(0, data.openingBalance ?? 0));
     if (USE_API) {
-      api.addAccount(data)
+      api
+        .addAccount({ ...data, openingBalance: opening > 0.005 ? opening : undefined })
         .then(() => refreshFromApi())
         .catch((e: any) => toast.error(e?.message || 'Failed to add account'));
       return;
     }
     const id = generateId('A');
     const newAccount: Account = { id, name: data.name, type: AccountType.ASSET, category: data.category, balance: 0 };
-    setAccounts(prev => [...prev, newAccount]);
+    setAccounts((prev) => [...prev, newAccount]);
+    if (opening > 0.005) {
+      setTimeout(() => {
+        recordAssetOpeningBalance(id, data.name, opening, { storeId: user?.productId ?? undefined });
+      }, 0);
+    }
   };
 
   const updateAccount = async (id: string, data: { name: string }) => {
@@ -707,7 +746,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const totalExpenses = expenses.reduce((sum, item) => sum + item.balance, 0);
     const completed = transactionsForUser.filter(t => t.status === 'COMPLETED');
     const swipeNet = totalSwipeInflowNetProfitWorkbook(completed);
-    const paySwipeNet = totalPaySwipeRecoveryNetMargin(completed);
+    const paySwipeNet = totalPaySwipeWorkbookNetMargin(completed);
     const i002 = getAccountBalance('I002');
     const e002 = getAccountBalance('E002');
     const e003 = getAccountBalance('E003');
@@ -854,6 +893,7 @@ export const ERPProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       updateAccount,
       deleteAccount,
       recordWalletOpeningBalance,
+      recordAccountOpeningBalance,
       generateBalanceSheet,
       generateProfitAndLoss,
       exportBackup,

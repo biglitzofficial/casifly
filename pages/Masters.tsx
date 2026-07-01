@@ -13,41 +13,9 @@ import { INITIAL_ACCOUNTS } from '../constants';
 import { buildTransferExpensePerInflowId, isSwipePayInflow, parseSwipeInflowEconomics } from '../lib/swipeTxnEconomics';
 import { isReceivableWallet } from '../lib/receivablesPayables';
 import { canDeleteBankCashAccount } from '../lib/chartOfAccounts';
+import { sumOpeningCapitalForAccounts, sumOpeningForAccount } from '../lib/openingCapital';
 
 type Tab = 'reconcile' | 'customers' | 'wallets' | 'banks' | 'data';
-
-/**
- * Net capital from wallet opening entries only: journal Dr wallet ledger / Cr Q002 (and reversals).
- * Stays fixed unless you add a wallet with opening balance or use “Opening balance adjustment” on a wallet.
- */
-function sumWalletOpeningCapitalFromTransactions(transactions: Transaction[], walletLedgerIds: Set<string>): number {
-  let sum = 0;
-  for (const t of transactions) {
-    if (t.status !== 'COMPLETED' || t.type !== TransactionType.JOURNAL) continue;
-    if (!/^Opening balance/i.test(t.description.trim())) continue;
-    if (t.entries.length !== 2) continue;
-    const qEntry = t.entries.find((e) => e.accountId === 'Q002');
-    const wEntry = t.entries.find((e) => walletLedgerIds.has(e.accountId));
-    if (!qEntry || !wEntry) continue;
-    sum += qEntry.credit - qEntry.debit;
-  }
-  return roundCurrency(sum);
-}
-
-/** Posted opening for one wallet ledger from “Opening balance…” journals (Dr/Cr with Q002). */
-function sumPerWalletOpeningFromTransactions(transactions: Transaction[], walletLedgerId: string): number {
-  let sum = 0;
-  for (const t of transactions) {
-    if (t.status !== 'COMPLETED' || t.type !== TransactionType.JOURNAL) continue;
-    if (!/^Opening balance/i.test(t.description.trim())) continue;
-    if (t.entries.length !== 2) continue;
-    const qEntry = t.entries.find((e) => e.accountId === 'Q002');
-    const wEntry = t.entries.find((e) => e.accountId === walletLedgerId);
-    if (!qEntry || !wEntry) continue;
-    sum += wEntry.debit - wEntry.credit;
-  }
-  return roundCurrency(sum);
-}
 
 function WalletCapitalBreakdown({
   wallets,
@@ -69,7 +37,7 @@ function WalletCapitalBreakdown({
   const rows = useMemo(() => {
     return [...wallets]
       .map((w) => {
-        const opening = sumPerWalletOpeningFromTransactions(transactions, w.ledgerAccountId);
+        const opening = sumOpeningForAccount(transactions, w.ledgerAccountId);
         let attribNet = 0;
         for (const t of transactions) {
           if (t.status !== 'COMPLETED' || t.metadata?.walletId !== w.id) continue;
@@ -94,12 +62,6 @@ function WalletCapitalBreakdown({
   const l001Account = accounts.find((a) => a.id === 'L001');
   const payablesLabel = l001Account?.name ? `${l001Account.name} (L001)` : 'Customer Paid To (L001)';
   const walletLedgerIds = new Set(wallets.map((w) => w.ledgerAccountId));
-  const capitalOpening = sumWalletOpeningCapitalFromTransactions(transactions, walletLedgerIds);
-  const sourcesTotal = roundCurrency(capitalOpening + netProfit + payablesL001);
-  const receivablesPaySwipe = getAccountBalance('A006');
-  const a006Account = accounts.find((a) => a.id === 'A006');
-  const receivablesShortLabel = a006Account?.name ? `${a006Account.name} (A006)` : 'Customer Receivables (A006)';
-  const totalWalletsPlusReceivables = roundCurrency(totalWalletAssets + receivablesPaySwipe);
 
   const cashBankById = new Map<string, Account>();
   for (const a of accounts) {
@@ -120,9 +82,20 @@ function WalletCapitalBreakdown({
     const o = (a.category === 'Cash' ? 0 : 1) - (b.category === 'Cash' ? 0 : 1);
     return o !== 0 ? o : a.name.localeCompare(b.name);
   });
+
+  const capitalAssetIds = new Set<string>(walletLedgerIds);
+  for (const a of cashAndBankAccounts) capitalAssetIds.add(a.id);
+  const capitalOpening = sumOpeningCapitalForAccounts(transactions, capitalAssetIds);
+  const sourcesTotal = roundCurrency(capitalOpening + netProfit + payablesL001);
+  const receivablesPaySwipe = getAccountBalance('A006');
+  const a006Account = accounts.find((a) => a.id === 'A006');
+  const receivablesShortLabel = a006Account?.name ? `${a006Account.name} (A006)` : 'Customer Receivables (A006)';
+  const totalWalletsPlusReceivables = roundCurrency(totalWalletAssets + receivablesPaySwipe);
+
   const cashBankRows = cashAndBankAccounts.map((a) => ({
     a,
     balance: getAccountBalance(a.id),
+    opening: sumOpeningForAccount(transactions, a.id),
   }));
   const totalCashBank = cashBankRows.reduce((s, r) => s + r.balance, 0);
   /** Ledger liquid assets only — same total that must equal opening + profit + payables when books tie. */
@@ -192,7 +165,7 @@ function WalletCapitalBreakdown({
         <div className="mt-6 space-y-3">
           <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">How the columns relate</p>
           <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-            <strong>Opening capital</strong> counts only journals titled “Opening balance…” (new wallet or Edit wallet → opening adjustment). It does <strong>not</strong> change when you run Swipe &amp; Pay, Pay &amp; Swipe, or move money between wallets.
+            <strong>Opening capital</strong> counts journals titled “Opening balance…” — wallet, <strong>bank</strong>, or <strong>cash</strong> (Masters → Wallets or Banks &amp; Cash). Dr asset / Cr Retained earnings (Q002). It does <strong>not</strong> change when you run Swipe &amp; Pay, Pay &amp; Swipe, or move money between accounts.
             <strong className="font-semibold"> Wallets, receivables (A006), cash, and bank</strong> are liquid ledger balances. Their <strong>sum</strong> should equal <strong>opening + profit + payables</strong> — the profit (same as Reports → Transaction P&amp;L / Dashboard workbook) is already on the <strong>left</strong>, not double-added on the right. (Swipe inflow <strong>NET PROFIT</strong> is part of that P&amp;L net.)
           </p>
           <div className="grid sm:grid-cols-2 gap-0 rounded-xl border border-slate-200 dark:border-slate-600 overflow-hidden">
@@ -204,7 +177,7 @@ function WalletCapitalBreakdown({
                   <span className="font-mono font-bold text-slate-900 dark:text-slate-100 tabular-nums">{formatCurrency(capitalOpening)}</span>
                 </div>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-2 leading-snug">
-                  Not affected by wallet transactions. Changes only if you post another opening balance journal in Masters.
+                  Not affected by day-to-day transactions. Post opening via Wallets, or Banks &amp; Cash → Opening balance.
                 </p>
               </div>
               <div>
@@ -247,10 +220,15 @@ function WalletCapitalBreakdown({
                   </span>
                   <span className="font-mono font-semibold text-violet-700 dark:text-violet-400 tabular-nums shrink-0">{formatCurrency(receivablesPaySwipe)}</span>
                 </div>
-                {cashBankRows.map(({ a, balance }) => (
+                {cashBankRows.map(({ a, balance, opening }) => (
                   <div key={a.id} className="flex justify-between gap-2">
                     <span className="text-slate-600 dark:text-slate-400 truncate">
                       {a.category === 'Cash' ? 'Cash' : 'Bank'} · {a.name} <span className="font-mono text-xs text-slate-400">({a.id})</span>
+                      {opening > 0.005 && (
+                        <span className="block text-[10px] text-indigo-600 dark:text-indigo-400 font-medium mt-0.5">
+                          Opening {formatCurrency(opening)}
+                        </span>
+                      )}
                     </span>
                     <span className="font-mono font-medium text-sky-800 dark:text-sky-300 tabular-nums shrink-0">{formatCurrency(balance)}</span>
                   </div>
@@ -402,18 +380,23 @@ const DataBackupView = () => {
 };
 
 const BanksCashView = () => {
-  const { accounts, wallets, transactions, addAccount, updateAccount, deleteAccount, postTransaction, getAccountBalance, formatCurrency } = useERP();
+  const { accounts, wallets, transactions, addAccount, updateAccount, deleteAccount, postTransaction, recordAccountOpeningBalance, getAccountBalance, formatCurrency } = useERP();
   const { user } = useAuth();
   const toast = useToast();
   const { confirm } = useConfirm();
   const canCreateAccounts = user?.role === 'master_admin' || user?.role === 'product_admin';
 
   const [newBankName, setNewBankName] = useState('');
+  const [newBankOpening, setNewBankOpening] = useState('');
   const [newCashName, setNewCashName] = useState('');
+  const [newCashOpening, setNewCashOpening] = useState('');
   const [addMoneyTarget, setAddMoneyTarget] = useState('');
   const [addMoneyAmount, setAddMoneyAmount] = useState('');
   const [addMoneySource, setAddMoneySource] = useState('Q001');
   const [addMoneyError, setAddMoneyError] = useState('');
+  const [openingAccountId, setOpeningAccountId] = useState('');
+  const [openingAmount, setOpeningAmount] = useState('');
+  const [openingError, setOpeningError] = useState('');
   const [editingAccount, setEditingAccount] = useState<{ id: string; category: string } | null>(null);
   const [editAccountName, setEditAccountName] = useState('');
   const [editAccountError, setEditAccountError] = useState('');
@@ -433,12 +416,20 @@ const BanksCashView = () => {
     a.category === 'Equity' || (['Bank', 'Cash'].includes(a.category) && a.id !== addMoneyTarget)
   ).map(a => ({ id: a.id, name: `${a.name} (${formatCurrency(getAccountBalance(a.id))})` }));
 
+  const bankCashOnlyOptions = [
+    ...bankAccounts.map(a => ({ id: a.id, name: `${a.name} (${formatCurrency(getAccountBalance(a.id))})`, category: 'Bank' as const })),
+    ...cashAccounts.map(a => ({ id: a.id, name: `${a.name} (${formatCurrency(getAccountBalance(a.id))})`, category: 'Cash' as const })),
+  ];
+
   const handleCreateBank = (e: React.FormEvent) => {
     e.preventDefault();
     const name = newBankName.trim();
     if (!name) { toast.error('Bank name required'); return; }
-    addAccount({ name, category: 'Bank' });
+    const o = newBankOpening.trim() === '' ? 0 : safeParseFloat(newBankOpening);
+    if (newBankOpening.trim() !== '' && (isNaN(o) || o < 0)) { toast.error('Opening balance must be 0 or more'); return; }
+    addAccount({ name, category: 'Bank', openingBalance: o > 0.005 ? o : undefined });
     setNewBankName('');
+    setNewBankOpening('');
     toast.success(`Bank "${name}" created`);
   };
 
@@ -446,9 +437,26 @@ const BanksCashView = () => {
     e.preventDefault();
     const name = newCashName.trim();
     if (!name) { toast.error('Cash account name required'); return; }
-    addAccount({ name, category: 'Cash' });
+    const o = newCashOpening.trim() === '' ? 0 : safeParseFloat(newCashOpening);
+    if (newCashOpening.trim() !== '' && (isNaN(o) || o < 0)) { toast.error('Opening balance must be 0 or more'); return; }
+    addAccount({ name, category: 'Cash', openingBalance: o > 0.005 ? o : undefined });
     setNewCashName('');
+    setNewCashOpening('');
     toast.success(`Cash account "${name}" created`);
+  };
+
+  const handlePostOpening = (e: React.FormEvent) => {
+    e.preventDefault();
+    setOpeningError('');
+    if (!openingAccountId) { setOpeningError('Select bank or cash account'); return; }
+    const v = safeParseFloat(openingAmount);
+    if (openingAmount.trim() === '' || isNaN(v) || Math.abs(v) < 0.005) {
+      setOpeningError('Enter a non-zero amount (negative reduces opening)');
+      return;
+    }
+    recordAccountOpeningBalance(openingAccountId, v);
+    setOpeningAmount('');
+    toast.success('Opening balance posted');
   };
 
   const handleAddMoney = (e: React.FormEvent) => {
@@ -528,28 +536,46 @@ const BanksCashView = () => {
       {canCreateAccounts && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Card>
-            <CardHeader title="Create New Bank" subtitle="Add a new bank account to the chart of accounts" />
+            <CardHeader title="Create New Bank" subtitle="Add a bank account; optional opening balance books capital (Dr bank / Cr Q002)" />
             <CardContent>
-              <form onSubmit={handleCreateBank} className="flex gap-3">
+              <form onSubmit={handleCreateBank} className="space-y-3 max-w-xl">
                 <Input
                   value={newBankName}
                   onChange={e => setNewBankName(e.target.value)}
                   placeholder="e.g. HDFC Bank Main"
-                  className="flex-1"
+                  label="Bank name"
+                />
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newBankOpening}
+                  onChange={(e) => setNewBankOpening(e.target.value)}
+                  placeholder="0"
+                  label="Opening balance (₹) — optional"
                 />
                 <Button type="submit">Create Bank</Button>
               </form>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader title="Create New Cash Account" subtitle="Add cash drawer or petty cash account" />
+            <CardHeader title="Create New Cash Account" subtitle="Add cash drawer; optional opening balance books capital (Dr cash / Cr Q002)" />
             <CardContent>
-              <form onSubmit={handleCreateCash} className="flex gap-3">
+              <form onSubmit={handleCreateCash} className="space-y-3 max-w-xl">
                 <Input
                   value={newCashName}
                   onChange={e => setNewCashName(e.target.value)}
                   placeholder="e.g. Cash on Hand"
-                  className="flex-1"
+                  label="Cash account name"
+                />
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newCashOpening}
+                  onChange={(e) => setNewCashOpening(e.target.value)}
+                  placeholder="0"
+                  label="Opening balance (₹) — optional"
                 />
                 <Button type="submit">Create Cash</Button>
               </form>
@@ -603,6 +629,41 @@ const BanksCashView = () => {
           </form>
         </CardContent>
       </Card>
+
+      {canCreateAccounts && (
+        <Card className="border-indigo-100 dark:border-indigo-900/40">
+          <CardHeader
+            title="Opening capital — Bank &amp; Cash"
+            subtitle="Set starting balance like wallet opening: Dr bank/cash · Cr Retained earnings (Q002). Shows under Balance Sheet equity. Use negative amount to reduce opening."
+          />
+          <CardContent>
+            <form onSubmit={handlePostOpening} className="space-y-4 max-w-xl">
+              <Select
+                label="Bank or cash account"
+                value={openingAccountId}
+                onChange={(e) => { setOpeningAccountId(e.target.value); setOpeningError(''); }}
+                options={[
+                  { value: '', label: '– Select account –' },
+                  ...bankCashOnlyOptions.map((o) => ({ value: o.id, label: o.name })),
+                ]}
+              />
+              <Input
+                label="Amount (₹)"
+                type="number"
+                step="0.01"
+                value={openingAmount}
+                onChange={(e) => { setOpeningAmount(e.target.value); setOpeningError(''); }}
+                placeholder="e.g. 500000 or -5000 to reduce"
+              />
+              {openingError && <p className="text-sm text-rose-600">{openingError}</p>}
+              <p className="text-xs text-slate-500 leading-relaxed">
+                This is <strong>capital / opening</strong>, not day-to-day “Add money”. Balance Sheet: bank/cash goes up on assets; Q002 (Retained earnings) goes up on equity.
+              </p>
+              <Button type="submit">Post opening balance</Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader title="Current Balances" subtitle="Store-scoped: balances reflect only transactions for your store. Bank and cash rows can be edited or deleted by store admin." />
